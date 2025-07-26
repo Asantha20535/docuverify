@@ -24,12 +24,12 @@ Preferred communication style: Simple, everyday language.
 - **Session Management**: express-session with PostgreSQL store
 - **File Handling**: Multer for document uploads
 - **Authentication**: bcrypt for password hashing
-- **Database ORM**: Drizzle ORM with Neon PostgreSQL
+- **Database ORM**: Drizzle ORM with PostgreSQL
 
 ### Database Design
-- **Primary Database**: PostgreSQL via Neon Database
+- **Primary Database**: PostgreSQL (local)
 - **Schema Management**: Drizzle Kit for migrations
-- **Connection**: Connection pooling with @neondatabase/serverless
+- **Connection**: Connection pooling with pg.Pool
 
 ## Key Components
 
@@ -96,7 +96,7 @@ Preferred communication style: Simple, everyday language.
 - **Drizzle ORM**: Type-safe SQL ORM for PostgreSQL
 
 ### Backend Services
-- **Neon Database**: Serverless PostgreSQL hosting
+- **PostgreSQL Database**: Local PostgreSQL with connection pooling
 - **Express Session**: Session management middleware
 - **Multer**: File upload handling
 - **bcrypt**: Password hashing library
@@ -111,14 +111,14 @@ Preferred communication style: Simple, everyday language.
 
 ### Development Environment
 - **Local Development**: Vite dev server with hot reload
-- **Database**: Neon PostgreSQL with connection pooling
+- **Database**: PostgreSQL with connection pooling
 - **File Storage**: Local filesystem for uploaded documents
 - **Session Store**: PostgreSQL-backed session storage
 
 ### Production Build
 - **Frontend**: Static files built with Vite
 - **Backend**: Node.js server with Express
-- **Database**: Neon PostgreSQL with production optimizations
+- **Database**: PostgreSQL with production optimizations
 - **File Handling**: Structured upload directory with 10MB file limits
 
 ### Environment Configuration

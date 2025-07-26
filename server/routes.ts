@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import { Pool } from "pg";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import multer from "multer";
@@ -46,8 +48,20 @@ const workflowConfigs = {
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Session store configuration
+  const pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+  });
+  
+  const PgSession = connectPgSimple(session);
+  
   // Session configuration
   app.use(session({
+    store: new PgSession({
+      pool: pgPool,
+      tableName: 'session',
+      createTableIfMissing: true,
+    }),
     secret: process.env.SESSION_SECRET || "university-secret-key",
     resave: false,
     saveUninitialized: false,
