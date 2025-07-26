@@ -17,6 +17,10 @@ export const documentTypeEnum = pgEnum("document_type", [
   "transcript_request",
   "enrollment_verification", 
   "grade_report",
+  "certificate_verification",
+  "letter_of_recommendation",
+  "academic_record",
+  "degree_verification",
   "other"
 ]);
 
@@ -46,6 +50,7 @@ export const users = pgTable("users", {
   fullName: text("full_name").notNull(),
   role: userRoleEnum("role").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  isGraduated: boolean("is_graduated").default(false), // For students only
   createdAt: timestamp("created_at").defaultNow().notNull(),
   lastLogin: timestamp("last_login"),
 });
@@ -95,6 +100,18 @@ export const verificationLogs = pgTable("verification_logs", {
   userAgent: text("user_agent"),
   isVerified: boolean("is_verified").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const documentTemplates = pgTable("document_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: documentTypeEnum("type").notNull(),
+  description: text("description"),
+  approvalPath: jsonb("approval_path").notNull().$type<string[]>(),
+  requiredRoles: jsonb("required_roles").notNull().$type<string[]>(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Relations
@@ -159,6 +176,12 @@ export const insertVerificationLogSchema = createInsertSchema(verificationLogs).
   createdAt: true,
 });
 
+export const insertDocumentTemplateSchema = createInsertSchema(documentTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -170,3 +193,5 @@ export type WorkflowAction = typeof workflowActions.$inferSelect;
 export type InsertWorkflowAction = z.infer<typeof insertWorkflowActionSchema>;
 export type VerificationLog = typeof verificationLogs.$inferSelect;
 export type InsertVerificationLog = z.infer<typeof insertVerificationLogSchema>;
+export type DocumentTemplate = typeof documentTemplates.$inferSelect;
+export type InsertDocumentTemplate = z.infer<typeof insertDocumentTemplateSchema>;

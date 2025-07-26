@@ -5,6 +5,7 @@ export interface User {
   fullName: string;
   role: "student" | "academic_staff" | "department_head" | "dean" | "vice_chancellor" | "assistant_registrar" | "admin";
   isActive: boolean;
+  isGraduated?: boolean; // For students only
   createdAt: string;
   lastLogin?: string;
 }
@@ -13,7 +14,7 @@ export interface Document {
   id: string;
   title: string;
   description?: string;
-  type: "transcript_request" | "enrollment_verification" | "grade_report" | "other";
+  type: "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other";
   fileName: string;
   filePath: string;
   fileSize: number;
@@ -53,4 +54,16 @@ export interface DocumentWithDetails extends Document {
   workflow?: Workflow & {
     actions: WorkflowAction[];
   };
+}
+
+export interface DocumentTemplate {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+  approvalPath: string[];
+  requiredRoles: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

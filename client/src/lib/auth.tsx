@@ -38,6 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         case "student":
           setLocation("/dashboard/student");
           break;
+        case "academic_staff":
+        case "department_head":
+        case "dean":
+        case "vice_chancellor":
+        case "assistant_registrar":
+          setLocation("/dashboard/staff");
+          break;
         default:
           setLocation("/dashboard/workflow");
           break;

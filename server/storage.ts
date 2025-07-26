@@ -1,8 +1,8 @@
 import { 
-  users, documents, workflows, workflowActions, verificationLogs,
+  users, documents, workflows, workflowActions, verificationLogs, documentTemplates,
   type User, type InsertUser, type Document, type InsertDocument,
   type Workflow, type InsertWorkflow, type WorkflowAction, type InsertWorkflowAction,
-  type VerificationLog, type InsertVerificationLog
+  type VerificationLog, type InsertVerificationLog, type DocumentTemplate, type InsertDocumentTemplate
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc } from "drizzle-orm";
@@ -40,6 +40,13 @@ export interface IStorage {
   // Verification operations
   createVerificationLog(log: InsertVerificationLog): Promise<VerificationLog>;
   getDocumentForVerification(hash: string): Promise<(Document & { user: User, workflow?: (Workflow & { actions: (WorkflowAction & { user: User })[] }) }) | undefined>;
+
+  // Document template operations
+  getAllDocumentTemplates(): Promise<DocumentTemplate[]>;
+  getDocumentTemplate(id: string): Promise<DocumentTemplate | undefined>;
+  getDocumentTemplatesByRole(role: string): Promise<DocumentTemplate[]>;
+  createDocumentTemplate(template: InsertDocumentTemplate): Promise<DocumentTemplate>;
+  updateDocumentTemplate(id: string, updates: Partial<InsertDocumentTemplate>): Promise<DocumentTemplate>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -234,6 +241,50 @@ export class DatabaseStorage implements IStorage {
       user: document.users,
       workflow: workflowWithActions
     } as any;
+  }
+
+  async getAllDocumentTemplates(): Promise<DocumentTemplate[]> {
+    return await db.select().from(documentTemplates).where(eq(documentTemplates.isActive, true));
+  }
+
+  async getDocumentTemplate(id: string): Promise<DocumentTemplate | undefined> {
+    const [template] = await db.select().from(documentTemplates).where(eq(documentTemplates.id, id));
+    return template || undefined;
+  }
+
+  async getDocumentTemplatesByRole(role: string): Promise<DocumentTemplate[]> {
+    const templates = await db.select().from(documentTemplates).where(eq(documentTemplates.isActive, true));
+    return templates.filter(template => 
+      template.requiredRoles.includes(role) || role === 'admin'
+    );
+  }
+
+  async createDocumentTemplate(insertTemplate: InsertDocumentTemplate): Promise<DocumentTemplate> {
+    const templateData: any = {
+      ...insertTemplate,
+      approvalPath: Array.isArray(insertTemplate.approvalPath) ? insertTemplate.approvalPath : [],
+      requiredRoles: Array.isArray(insertTemplate.requiredRoles) ? insertTemplate.requiredRoles : []
+    };
+    
+    const [template] = await db
+      .insert(documentTemplates)
+      .values(templateData)
+      .returning();
+    return template;
+  }
+
+  async updateDocumentTemplate(id: string, updates: Partial<InsertDocumentTemplate>): Promise<DocumentTemplate> {
+    const updateData: any = { 
+      ...updates, 
+      updatedAt: new Date()
+    };
+    
+    const [template] = await db
+      .update(documentTemplates)
+      .set(updateData)
+      .where(eq(documentTemplates.id, id))
+      .returning();
+    return template;
   }
 }
 

@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import StudentDashboard from "@/pages/dashboard/student";
+import StaffDashboard from "@/pages/dashboard/staff";
 import WorkflowDashboard from "@/pages/dashboard/workflow";
 import AdminDashboard from "@/pages/dashboard/admin";
 import VerifyPortal from "@/pages/verify";
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/" component={Login} />
       <Route path="/login" component={Login} />
       <Route path="/dashboard/student" component={StudentDashboard} />
+      <Route path="/dashboard/staff" component={StaffDashboard} />
       <Route path="/dashboard/workflow" component={WorkflowDashboard} />
       <Route path="/dashboard/admin" component={AdminDashboard} />
       <Route path="/verify" component={VerifyPortal} />

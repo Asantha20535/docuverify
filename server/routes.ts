@@ -108,6 +108,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           email: user.email,
           fullName: user.fullName,
           role: user.role,
+          isGraduated: user.isGraduated,
         },
       });
     } catch (error) {
@@ -138,6 +139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        isGraduated: user.isGraduated,
       });
     } catch (error) {
       console.error("Get user error:", error);
@@ -145,17 +147,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Document routes
-  app.post("/api/documents/upload", requireAuth, upload.single("file"), async (req, res) => {
+  // Document routes - for staff with file uploads
+  app.post("/api/documents/upload", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]), upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const { title, description, type } = req.body;
+      const { title, description, templateId } = req.body;
       
-      if (!title || !type) {
-        return res.status(400).json({ message: "Title and type are required" });
+      if (!title || !templateId) {
+        return res.status(400).json({ message: "Title and template are required" });
+      }
+
+      const template = await storage.getDocumentTemplate(templateId);
+      if (!template) {
+        return res.status(400).json({ message: "Invalid template selected" });
       }
 
       // Generate SHA-256 hash
@@ -175,7 +182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await storage.createDocument({
         title,
         description: description || null,
-        type: type as any,
+        type: template.type,
         fileName: req.file.originalname,
         filePath: finalPath,
         fileSize: req.file.size,
@@ -185,8 +192,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "pending",
       });
 
-      // Create workflow
-      const stepRoles = workflowConfigs[type as keyof typeof workflowConfigs] || workflowConfigs.other;
+      // Create workflow using template's approval path
+      const stepRoles = template.approvalPath;
       await storage.createWorkflow({
         documentId: document.id,
         currentStep: 0,
@@ -201,6 +208,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ document, hash });
     } catch (error) {
       console.error("Upload error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Student transcript request route
+  app.post("/api/documents/request-transcript", requireAuth, requireRole(["student"]), async (req, res) => {
+    try {
+      const { title, description } = req.body;
+      
+      if (!title) {
+        return res.status(400).json({ message: "Title is required" });
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Determine approval path based on graduation status
+      const stepRoles = user.isGraduated 
+        ? ["academic_staff", "assistant_registrar"]  // Graduated students
+        : ["academic_staff", "dean"];                 // Non-graduated students
+
+      // Generate a unique hash for the transcript request (no file uploaded)
+      const requestData = `${user.id}-${title}-${Date.now()}`;
+      const hash = crypto.createHash("sha256").update(requestData).digest("hex");
+
+      // Save document metadata (no actual file for transcript requests)
+      const document = await storage.createDocument({
+        title,
+        description: description || null,
+        type: "transcript_request",
+        fileName: "transcript_request.pdf", // Placeholder filename
+        filePath: "", // No file path for requests
+        fileSize: 0,
+        mimeType: "application/pdf",
+        hash,
+        userId: req.session.userId!,
+        status: "pending",
+      });
+
+      // Create workflow
+      await storage.createWorkflow({
+        documentId: document.id,
+        currentStep: 0,
+        totalSteps: stepRoles.length,
+        stepRoles,
+        isCompleted: false,
+      });
+
+      // Update document status to in_review
+      await storage.updateDocument(document.id, { status: "in_review" });
+
+      res.json({ document, hash });
+    } catch (error) {
+      console.error("Transcript request error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -464,6 +527,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error) {
       console.error("Get workflow stats error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Document template routes
+  app.get("/api/templates", requireAuth, async (req, res) => {
+    try {
+      const templates = await storage.getDocumentTemplatesByRole(req.session.userRole!);
+      res.json(templates);
+    } catch (error) {
+      console.error("Get templates error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/templates", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const templates = await storage.getAllDocumentTemplates();
+      res.json(templates);
+    } catch (error) {
+      console.error("Get all templates error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/templates", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const template = await storage.createDocumentTemplate(req.body);
+      res.status(201).json(template);
+    } catch (error) {
+      console.error("Create template error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.put("/api/admin/templates/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const template = await storage.updateDocumentTemplate(req.params.id, req.body);
+      res.json(template);
+    } catch (error) {
+      console.error("Update template error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

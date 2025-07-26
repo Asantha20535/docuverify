@@ -81,7 +81,7 @@ export default function UserManagement({ users }: UserManagementProps) {
     const matchesSearch = user.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = !roleFilter || user.role === roleFilter;
+    const matchesRole = !roleFilter || roleFilter === "all" || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
 
@@ -212,7 +212,7 @@ export default function UserManagement({ users }: UserManagementProps) {
               <SelectValue placeholder="All Roles" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Roles</SelectItem>
+              <SelectItem value="all">All Roles</SelectItem>
               <SelectItem value="student">Student</SelectItem>
               <SelectItem value="academic_staff">Academic Staff</SelectItem>
               <SelectItem value="department_head">Department Head</SelectItem>
