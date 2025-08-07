@@ -666,18 +666,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/course-unit/generate-transcript", requireAuth, requireRole(["course_unit"]), async (req, res) => {
+  app.post("/api/course-unit/upload-transcript", requireAuth, requireRole(["course_unit"]), upload.single('transcript'), async (req, res) => {
     try {
-      const { requestId, transcriptData } = req.body;
+      const { requestId, comments } = req.body;
       
+      if (!req.file) {
+        return res.status(400).json({ message: "Transcript file is required" });
+      }
+
       // Get the transcript request
       const request = await storage.getTranscriptRequest(requestId);
       if (!request) {
         return res.status(404).json({ message: "Transcript request not found" });
       }
 
-      // Generate transcript document
-      const transcriptDocument = await storage.createTranscriptDocument(request, transcriptData);
+      // Generate hash for the uploaded file
+      const hash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+
+      // Create transcript document
+      const transcriptDocument = await storage.createDocument({
+        title: `Transcript - ${request.student.fullName}`,
+        description: `Uploaded transcript for ${request.student.fullName}. ${comments ? `Comments: ${comments}` : ""}`,
+        type: "academic_record",
+        fileName: req.file.originalname,
+        filePath: req.file.path,
+        fileSize: req.file.size,
+        mimeType: req.file.mimetype,
+        hash,
+        status: "pending",
+        userId: request.student.id,
+      });
       
       // Create workflow based on graduation status
       const workflowSteps = request.student.isGraduated 
@@ -691,12 +709,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stepRoles: workflowSteps,
       });
 
-      // Create initial workflow action (course unit generated)
+      // Create initial workflow action (course unit uploaded)
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: req.session.userId!,
         action: "uploaded",
-        comment: `Transcript generated. GPA: ${transcriptData.gpa}, Credits: ${transcriptData.totalCredits}${transcriptData.comments ? `, Comments: ${transcriptData.comments}` : ""}`,
+        comment: `Transcript uploaded. ${comments ? `Comments: ${comments}` : ""}`,
         step: 0,
         signature: req.session.userId!,
       });
@@ -704,9 +722,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update original request status
       await storage.updateDocument(requestId, { status: "in_review" });
 
-      res.json({ message: "Transcript generated and forwarded successfully" });
+      res.json({ message: "Transcript uploaded and forwarded successfully" });
     } catch (error) {
-      console.error("Generate transcript error:", error);
+      console.error("Upload transcript error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

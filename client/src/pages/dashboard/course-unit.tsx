@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileText, Clock, CheckCircle, GraduationCap, LogOut, Plus, User, Calendar } from "lucide-react";
+import { FileText, Clock, CheckCircle, GraduationCap, LogOut, Upload, User, Calendar } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, apiRequestWithFormData } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useState } from "react";
 
@@ -31,11 +31,9 @@ export default function CourseUnitDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedRequest, setSelectedRequest] = useState<TranscriptRequest | null>(null);
-  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
-  const [transcriptData, setTranscriptData] = useState({
-    gpa: "",
-    totalCredits: "",
-    graduationDate: "",
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+  const [uploadData, setUploadData] = useState({
     comments: "",
   });
 
@@ -51,53 +49,48 @@ export default function CourseUnitDashboard() {
     queryKey: ["/api/course-unit/stats"],
   });
 
-  const generateTranscriptMutation = useMutation({
-    mutationFn: async (data: { requestId: string; transcriptData: any }) => {
-      const response = await apiRequest("POST", "/api/course-unit/generate-transcript", data);
+  const uploadTranscriptMutation = useMutation({
+    mutationFn: async (data: { requestId: string; file: File; comments: string }) => {
+      const formData = new FormData();
+      formData.append('requestId', data.requestId);
+      formData.append('transcript', data.file);
+      formData.append('comments', data.comments);
+
+      const response = await apiRequestWithFormData("POST", "/api/course-unit/upload-transcript", formData);
       return response.json();
     },
     onSuccess: () => {
       toast({
-        title: "Transcript Generated",
-        description: "Transcript has been generated and forwarded to the appropriate authority",
+        title: "Transcript Uploaded",
+        description: "Transcript has been uploaded and forwarded to the appropriate authority",
       });
-      setTranscriptData({
-        gpa: "",
-        totalCredits: "",
-        graduationDate: "",
+      setUploadData({
         comments: "",
       });
-      setIsGenerateModalOpen(false);
+      setTranscriptFile(null);
+      setIsUploadModalOpen(false);
       setSelectedRequest(null);
       queryClient.invalidateQueries({ queryKey: ["/api/course-unit/transcript-requests"] });
       queryClient.invalidateQueries({ queryKey: ["/api/course-unit/stats"] });
     },
     onError: (error: any) => {
       toast({
-        title: "Generation Failed",
-        description: error.message || "Failed to generate transcript",
+        title: "Upload Failed",
+        description: error.message || "Failed to upload transcript",
         variant: "destructive",
       });
     },
   });
 
-  const handleGenerateTranscript = (e: React.FormEvent) => {
+  const handleUploadTranscript = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!selectedRequest) return;
+    if (!selectedRequest || !transcriptFile) return;
 
-    if (!transcriptData.gpa || !transcriptData.totalCredits) {
-      toast({
-        title: "Error",
-        description: "Please provide GPA and total credits",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    generateTranscriptMutation.mutate({
+    uploadTranscriptMutation.mutate({
       requestId: selectedRequest.id,
-      transcriptData,
+      file: transcriptFile,
+      comments: uploadData.comments,
     });
   };
 
@@ -218,6 +211,9 @@ export default function CourseUnitDashboard() {
               <div className="text-center py-8">
                 <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600">No transcript requests found</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Students need to request transcripts first before you can upload them.
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -258,12 +254,12 @@ export default function CourseUnitDashboard() {
                         size="sm"
                         onClick={() => {
                           setSelectedRequest(request);
-                          setIsGenerateModalOpen(true);
+                          setIsUploadModalOpen(true);
                         }}
-                        disabled={request.status !== "pending"}
+                        disabled={!["pending", "in_review"].includes(request.status)}
                       >
-                        <Plus className="w-4 h-4 mr-1" />
-                        Generate Transcript
+                        <Upload className="w-4 h-4 mr-1" />
+                        Upload Transcript
                       </Button>
                     </div>
                   </div>
@@ -274,10 +270,10 @@ export default function CourseUnitDashboard() {
         </Card>
       </div>
 
-      <Dialog open={isGenerateModalOpen} onOpenChange={setIsGenerateModalOpen}>
+      <Dialog open={isUploadModalOpen} onOpenChange={setIsUploadModalOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Generate Transcript</DialogTitle>
+            <DialogTitle>Upload Transcript</DialogTitle>
           </DialogHeader>
           
           {selectedRequest && (
@@ -293,67 +289,47 @@ export default function CourseUnitDashboard() {
                 </div>
               </div>
 
-              <form onSubmit={handleGenerateTranscript} className="space-y-4">
+              <form onSubmit={handleUploadTranscript} className="space-y-4">
                 <div>
-                  <Label htmlFor="gpa">GPA</Label>
+                  <Label htmlFor="transcript-file">Transcript File *</Label>
                   <Input
-                    id="gpa"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="4"
-                    placeholder="3.50"
-                    value={transcriptData.gpa}
-                    onChange={(e) => setTranscriptData({ ...transcriptData, gpa: e.target.value })}
+                    id="transcript-file"
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    className="mt-1"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setTranscriptFile(file);
+                      }
+                    }}
                     required
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Upload the transcript file (PDF, DOC, DOCX)
+                  </p>
                 </div>
-
-                <div>
-                  <Label htmlFor="totalCredits">Total Credits</Label>
-                  <Input
-                    id="totalCredits"
-                    type="number"
-                    placeholder="120"
-                    value={transcriptData.totalCredits}
-                    onChange={(e) => setTranscriptData({ ...transcriptData, totalCredits: e.target.value })}
-                    required
-                  />
-                </div>
-
-                {selectedRequest.student.isGraduated && (
-                  <div>
-                    <Label htmlFor="graduationDate">Graduation Date</Label>
-                    <Input
-                      id="graduationDate"
-                      type="date"
-                      value={transcriptData.graduationDate}
-                      onChange={(e) => setTranscriptData({ ...transcriptData, graduationDate: e.target.value })}
-                      required
-                    />
-                  </div>
-                )}
 
                 <div>
                   <Label htmlFor="comments">Comments (Optional)</Label>
                   <Textarea
                     id="comments"
                     rows={3}
-                    placeholder="Additional notes..."
-                    value={transcriptData.comments}
-                    onChange={(e) => setTranscriptData({ ...transcriptData, comments: e.target.value })}
+                    placeholder="Additional notes about the transcript..."
+                    value={uploadData.comments}
+                    onChange={(e) => setUploadData({ ...uploadData, comments: e.target.value })}
                   />
                 </div>
 
                 <div className="flex justify-end space-x-3">
-                  <Button type="button" variant="outline" onClick={() => setIsGenerateModalOpen(false)}>
+                  <Button type="button" variant="outline" onClick={() => setIsUploadModalOpen(false)}>
                     Cancel
                   </Button>
                   <Button 
                     type="submit" 
-                    disabled={generateTranscriptMutation.isPending}
+                    disabled={uploadTranscriptMutation.isPending || !transcriptFile}
                   >
-                    {generateTranscriptMutation.isPending ? "Generating..." : "Generate & Forward"}
+                    {uploadTranscriptMutation.isPending ? "Uploading..." : "Upload & Forward"}
                   </Button>
                 </div>
               </form>

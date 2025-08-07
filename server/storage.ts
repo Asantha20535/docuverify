@@ -53,7 +53,6 @@ export interface IStorage {
   getTranscriptRequestsForCourseUnit(): Promise<any[]>;
   getCourseUnitStats(): Promise<{ pendingRequests: number; processedToday: number; totalRequests: number }>;
   getTranscriptRequest(id: string): Promise<any | undefined>;
-  createTranscriptDocument(request: any, transcriptData: any): Promise<Document>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -373,32 +372,6 @@ export class DatabaseStorage implements IStorage {
       ));
     
     return request || undefined;
-  }
-
-  async createTranscriptDocument(request: any, transcriptData: any): Promise<Document> {
-    const fileName = `transcript_${request.student.id}_${Date.now()}.pdf`;
-    const filePath = `uploads/${fileName}`;
-    const fileSize = 1024; // Mock file size
-    const mimeType = "application/pdf";
-    const hash = `transcript_${request.student.id}_${Date.now()}`; // Mock hash
-
-    const [document] = await db
-      .insert(documents)
-      .values({
-        title: `Transcript - ${request.student.fullName}`,
-        description: `Generated transcript for ${request.student.fullName}. GPA: ${transcriptData.gpa}, Credits: ${transcriptData.totalCredits}`,
-        type: "academic_record",
-        fileName,
-        filePath,
-        fileSize,
-        mimeType,
-        hash,
-        status: "pending",
-        userId: request.student.id,
-      })
-      .returning();
-    
-    return document;
   }
 }
 
