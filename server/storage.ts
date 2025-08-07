@@ -5,7 +5,7 @@ import {
   type VerificationLog, type InsertVerificationLog, type DocumentTemplate, type InsertDocumentTemplate
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -14,6 +14,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
+  deleteUser(id: string): Promise<void>;
   getAllUsers(): Promise<User[]>;
   updateLastLogin(id: string): Promise<void>;
 
@@ -47,6 +48,12 @@ export interface IStorage {
   getDocumentTemplatesByRole(role: string): Promise<DocumentTemplate[]>;
   createDocumentTemplate(template: InsertDocumentTemplate): Promise<DocumentTemplate>;
   updateDocumentTemplate(id: string, updates: Partial<InsertDocumentTemplate>): Promise<DocumentTemplate>;
+
+  // Course Unit operations
+  getTranscriptRequestsForCourseUnit(): Promise<any[]>;
+  getCourseUnitStats(): Promise<{ pendingRequests: number; processedToday: number; totalRequests: number }>;
+  getTranscriptRequest(id: string): Promise<any | undefined>;
+  createTranscriptDocument(request: any, transcriptData: any): Promise<Document>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -80,6 +87,10 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
   }
 
   async getAllUsers(): Promise<User[]> {
@@ -285,6 +296,109 @@ export class DatabaseStorage implements IStorage {
       .where(eq(documentTemplates.id, id))
       .returning();
     return template;
+  }
+
+  // Course Unit operations
+  async getTranscriptRequestsForCourseUnit(): Promise<any[]> {
+    const requests = await db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        createdAt: documents.createdAt,
+        status: documents.status,
+        student: {
+          id: users.id,
+          fullName: users.fullName,
+          isGraduated: users.isGraduated,
+        },
+      })
+      .from(documents)
+      .innerJoin(users, eq(documents.userId, users.id))
+      .where(eq(documents.type, "transcript_request"))
+      .orderBy(desc(documents.createdAt));
+    
+    return requests;
+  }
+
+  async getCourseUnitStats(): Promise<{ pendingRequests: number; processedToday: number; totalRequests: number }> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [totalRequests] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(documents)
+      .where(eq(documents.type, "transcript_request"));
+
+    const [pendingRequests] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(documents)
+      .where(and(
+        eq(documents.type, "transcript_request"),
+        eq(documents.status, "pending")
+      ));
+
+    const [processedToday] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(documents)
+      .where(and(
+        eq(documents.type, "transcript_request"),
+        sql`${documents.updatedAt} >= ${today}`
+      ));
+
+    return {
+      pendingRequests: pendingRequests.count,
+      processedToday: processedToday.count,
+      totalRequests: totalRequests.count,
+    };
+  }
+
+  async getTranscriptRequest(id: string): Promise<any | undefined> {
+    const [request] = await db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        createdAt: documents.createdAt,
+        status: documents.status,
+        student: {
+          id: users.id,
+          fullName: users.fullName,
+          isGraduated: users.isGraduated,
+        },
+      })
+      .from(documents)
+      .innerJoin(users, eq(documents.userId, users.id))
+      .where(and(
+        eq(documents.id, id),
+        eq(documents.type, "transcript_request")
+      ));
+    
+    return request || undefined;
+  }
+
+  async createTranscriptDocument(request: any, transcriptData: any): Promise<Document> {
+    const fileName = `transcript_${request.student.id}_${Date.now()}.pdf`;
+    const filePath = `uploads/${fileName}`;
+    const fileSize = 1024; // Mock file size
+    const mimeType = "application/pdf";
+    const hash = `transcript_${request.student.id}_${Date.now()}`; // Mock hash
+
+    const [document] = await db
+      .insert(documents)
+      .values({
+        title: `Transcript - ${request.student.fullName}`,
+        description: `Generated transcript for ${request.student.fullName}. GPA: ${transcriptData.gpa}, Credits: ${transcriptData.totalCredits}`,
+        type: "academic_record",
+        fileName,
+        filePath,
+        fileSize,
+        mimeType,
+        hash,
+        status: "pending",
+        userId: request.student.id,
+      })
+      .returning();
+    
+    return document;
   }
 }
 

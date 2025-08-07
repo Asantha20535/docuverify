@@ -3,9 +3,10 @@ export interface User {
   username: string;
   email: string;
   fullName: string;
-  role: "student" | "academic_staff" | "department_head" | "dean" | "vice_chancellor" | "assistant_registrar" | "admin";
+  role: "student" | "academic_staff" | "department_head" | "dean" | "vice_chancellor" | "assistant_registrar" | "course_unit" | "admin";
   isActive: boolean;
   isGraduated?: boolean; // For students only
+  signature?: string; // For non-student users
   createdAt: string;
   lastLogin?: string;
 }

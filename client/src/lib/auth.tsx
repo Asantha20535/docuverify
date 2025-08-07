@@ -45,6 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         case "assistant_registrar":
           setLocation("/dashboard/staff");
           break;
+        case "course_unit":
+          setLocation("/dashboard/course-unit");
+          break;
         default:
           setLocation("/dashboard/workflow");
           break;

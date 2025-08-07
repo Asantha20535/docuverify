@@ -9,6 +9,7 @@ import StudentDashboard from "@/pages/dashboard/student";
 import StaffDashboard from "@/pages/dashboard/staff";
 import WorkflowDashboard from "@/pages/dashboard/workflow";
 import AdminDashboard from "@/pages/dashboard/admin";
+import CourseUnitDashboard from "@/pages/dashboard/course-unit";
 import VerifyPortal from "@/pages/verify";
 import { AuthProvider } from "@/lib/auth";
 
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/dashboard/staff" component={StaffDashboard} />
       <Route path="/dashboard/workflow" component={WorkflowDashboard} />
       <Route path="/dashboard/admin" component={AdminDashboard} />
+      <Route path="/dashboard/course-unit" component={CourseUnitDashboard} />
       <Route path="/verify" component={VerifyPortal} />
       <Route component={NotFound} />
     </Switch>

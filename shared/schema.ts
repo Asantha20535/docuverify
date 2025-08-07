@@ -10,6 +10,7 @@ export const userRoleEnum = pgEnum("user_role", [
   "dean",
   "vice_chancellor",
   "assistant_registrar",
+  "course_unit",
   "admin"
 ]);
 
@@ -51,6 +52,7 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   isGraduated: boolean("is_graduated").default(false), // For students only
+  signature: text("signature"), // For non-student users - stores image file path
   createdAt: timestamp("created_at").defaultNow().notNull(),
   lastLogin: timestamp("last_login"),
 });

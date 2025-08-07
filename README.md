@@ -6,6 +6,7 @@ CREATE TYPE user_role AS ENUM (
   'dean',
   'vice_chancellor',
   'assistant_registrar',
+  'course_unit',
   'admin'
 );
 
@@ -115,17 +116,19 @@ CREATE TABLE document_templates (
 INSERT INTO users (username, password, email, full_name, role) VALUES
 ('admin', '$2b$10$1TblZATgT9DLnbGETfU6TOW7lXvOkCMp68aLGk5v/FccQHa3u9ZF6', 'admin@university.edu', 'System Administrator', 'admin'),
 ('student1', '$2b$10$Xn8/C5brf0gxge.YmIuY4Of8M2ddSRXMaVECdH/D2CpNhp5gSKqdq', 'student1@university.edu', 'John Student', 'student'),
+('student2', '$2b$10$Xn8/C5brf0gxge.YmIuY4Of8M2ddSRXMaVECdH/D2CpNhp5gSKqdq', 'student2@university.edu', 'Jane Graduate', 'student', true),
 ('professor1', '$2b$10$g2T1HlJYT1YOVpXUtwweg..C78PJt19GxWtKokr.w208F6RYFi7dC', 'prof1@university.edu', 'Dr. Jane Professor', 'academic_staff'),
 ('head1', '$2b$10$WGrCOsRnySmm62BmfeTheOpVpBPAlVFcqV80.1JKtNYNVFb1fUhgC', 'head1@university.edu', 'Dr. Department Head', 'department_head'),
 ('dean1', '$2b$10$bHCdxkKP.itHJY83aOXUZuolXqA/6LJcl5dMDdsAqHhK.K3XCghRq', 'dean1@university.edu', 'Dr. Faculty Dean', 'dean'),
 ('vc1', '$2b$10$bHCdxkKP.itHJY83aOXUZuolXqA/6LJcl5dMDdsAqHhK.K3XCghRq', 'vc@university.edu', 'Dr. Vice Chancellor', 'vice_chancellor'),
-('registrar1', '$2b$10$bHCdxkKP.itHJY83aOXUZuolXqA/6LJcl5dMDdsAqHhK.K3XCghRq', 'registrar@university.edu', 'Assistant Registrar', 'assistant_registrar');
+('registrar1', '$2b$10$bHCdxkKP.itHJY83aOXUZuolXqA/6LJcl5dMDdsAqHhK.K3XCghRq', 'registrar@university.edu', 'Assistant Registrar', 'assistant_registrar'),
+('courseunit1', '$2b$10$bHCdxkKP.itHJY83aOXUZuolXqA/6LJcl5dMDdsAqHhK.K3XCghRq', 'courseunit@university.edu', 'Course Unit Manager', 'course_unit');
 
 -- Document Templates
 INSERT INTO document_templates (name, type, description, approval_path, required_roles) VALUES
 ('Standard Transcript Request', 'transcript_request', 'Official academic transcript processing',
- '["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]',
- '["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]'),
+ '["course_unit", "dean", "assistant_registrar"]',
+ '["course_unit", "dean", "assistant_registrar"]'),
 ('Enrollment Verification', 'enrollment_verification', 'Student enrollment status verification',
  '["academic_staff", "department_head", "dean"]',
  '["academic_staff", "department_head", "dean"]'),

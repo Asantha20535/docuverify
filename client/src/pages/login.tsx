@@ -95,6 +95,7 @@ export default function Login() {
                       <SelectItem value="dean">Dean</SelectItem>
                       <SelectItem value="vice_chancellor">Vice Chancellor</SelectItem>
                       <SelectItem value="assistant_registrar">Assistant Registrar</SelectItem>
+                      <SelectItem value="course_unit">Course Unit</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>

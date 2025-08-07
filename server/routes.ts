@@ -41,7 +41,8 @@ fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
 
 // Default workflow configurations
 const workflowConfigs = {
-  transcript_request: ["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"],
+  partial_transcript_request: ["dean"],
+  transcript_request: ["dean", "vice_chancellor", "assistant_registrar"],
   enrollment_verification: ["academic_staff", "department_head", "dean"],
   grade_report: ["academic_staff", "department_head"],
   other: ["academic_staff", "department_head"],
@@ -452,6 +453,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin user management routes
+  app.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deleteUser(id);
+      res.json({ message: "User deleted successfully" });
+    } catch (error) {
+      console.error("Delete user error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/deactivate", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.updateUser(id, { isActive: false });
+      res.json({ message: "User deactivated successfully" });
+    } catch (error) {
+      console.error("Deactivate user error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/activate", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.updateUser(id, { isActive: true });
+      res.json({ message: "User activated successfully" });
+    } catch (error) {
+      console.error("Activate user error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Signature upload route
+  app.post("/api/admin/users/:id/signature", requireAuth, requireRole(["admin"]), upload.single('signature'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      if (!req.file) {
+        return res.status(400).json({ message: "No signature file uploaded" });
+      }
+
+      // Validate file type
+      if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ message: "Only image files are allowed" });
+      }
+
+      // Update user with signature file path
+      await storage.updateUser(id, { signature: req.file.filename });
+      
+      res.json({ message: "Signature uploaded successfully", filename: req.file.filename });
+    } catch (error) {
+      console.error("Upload signature error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Public verification route
   app.post("/api/verify", async (req, res) => {
     try {
@@ -582,6 +641,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(template);
     } catch (error) {
       console.error("Update template error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Course Unit routes
+  app.get("/api/course-unit/transcript-requests", requireAuth, requireRole(["course_unit"]), async (req, res) => {
+    try {
+      const requests = await storage.getTranscriptRequestsForCourseUnit();
+      res.json(requests);
+    } catch (error) {
+      console.error("Get transcript requests error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/course-unit/stats", requireAuth, requireRole(["course_unit"]), async (req, res) => {
+    try {
+      const stats = await storage.getCourseUnitStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Get course unit stats error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/course-unit/generate-transcript", requireAuth, requireRole(["course_unit"]), async (req, res) => {
+    try {
+      const { requestId, transcriptData } = req.body;
+      
+      // Get the transcript request
+      const request = await storage.getTranscriptRequest(requestId);
+      if (!request) {
+        return res.status(404).json({ message: "Transcript request not found" });
+      }
+
+      // Generate transcript document
+      const transcriptDocument = await storage.createTranscriptDocument(request, transcriptData);
+      
+      // Create workflow based on graduation status
+      const workflowSteps = request.student.isGraduated 
+        ? ["course_unit", "assistant_registrar"] 
+        : ["course_unit", "dean"];
+      
+      const workflow = await storage.createWorkflow({
+        documentId: transcriptDocument.id,
+        currentStep: 0,
+        totalSteps: workflowSteps.length,
+        stepRoles: workflowSteps,
+      });
+
+      // Create initial workflow action (course unit generated)
+      await storage.createWorkflowAction({
+        workflowId: workflow.id,
+        userId: req.session.userId!,
+        action: "uploaded",
+        comment: `Transcript generated. GPA: ${transcriptData.gpa}, Credits: ${transcriptData.totalCredits}${transcriptData.comments ? `, Comments: ${transcriptData.comments}` : ""}`,
+        step: 0,
+        signature: req.session.userId!,
+      });
+
+      // Update original request status
+      await storage.updateDocument(requestId, { status: "in_review" });
+
+      res.json({ message: "Transcript generated and forwarded successfully" });
+    } catch (error) {
+      console.error("Generate transcript error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
