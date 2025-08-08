@@ -336,12 +336,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Not authorized for this workflow step" });
       }
 
+      // Normalize action to match enum values stored in DB
+      const normalizedAction = action === "approve"
+        ? "approved"
+        : action === "forward"
+          ? "forwarded"
+          : action === "reject"
+            ? "rejected"
+            : action;
+
       // Create workflow action
-      const signature = action === "approve" ? user!.fullName : null;
+      const signature = normalizedAction === "approved" ? user!.fullName : null;
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: user!.id,
-        action: action as any,
+        action: normalizedAction as any,
         comment: comment || null,
         step: workflow.currentStep,
         signature,
@@ -350,7 +359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update workflow based on action
       let updates: any = {};
       
-      if (action === "approve" || action === "forward") {
+      if (normalizedAction === "approved" || normalizedAction === "forwarded") {
         const nextStep = workflow.currentStep + 1;
         if (nextStep >= workflow.totalSteps) {
           // Workflow completed
@@ -366,7 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currentStep: nextStep,
           };
         }
-      } else if (action === "reject") {
+      } else if (normalizedAction === "rejected") {
         updates = {
           isCompleted: true,
         };
@@ -680,10 +689,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Transcript request not found" });
       }
 
-      // Generate hash for the uploaded file
-      const hash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+      // Generate hash for the uploaded file by reading from disk
+      const fileBuffer = await fs.readFile(req.file.path);
+      const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-      // Create transcript document
+      // Create transcript document (mark as in_review so next role sees it)
       const transcriptDocument = await storage.createDocument({
         title: `Transcript - ${request.student.fullName}`,
         description: `Uploaded transcript for ${request.student.fullName}. ${comments ? `Comments: ${comments}` : ""}`,
@@ -693,7 +703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
-        status: "pending",
+        status: "in_review",
         userId: request.student.id,
       });
       
@@ -713,11 +723,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: req.session.userId!,
-        action: "uploaded",
+        action: "uploaded" as any,
         comment: `Transcript uploaded. ${comments ? `Comments: ${comments}` : ""}`,
         step: 0,
         signature: req.session.userId!,
       });
+
+      // Advance workflow to next step to effectively forward
+      if (workflow.totalSteps > 1) {
+        await storage.updateWorkflow(workflow.id, { currentStep: 1 });
+      } else {
+        // Edge case: only one step, mark completed and approve
+        await storage.updateWorkflow(workflow.id, { currentStep: 1, isCompleted: true });
+        await storage.updateDocument(transcriptDocument.id, { status: "approved" });
+      }
 
       // Update original request status
       await storage.updateDocument(requestId, { status: "in_review" });
