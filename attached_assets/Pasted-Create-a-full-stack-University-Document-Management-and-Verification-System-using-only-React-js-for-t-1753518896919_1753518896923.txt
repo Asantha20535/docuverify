@@ -1,0 +1,135 @@
+Create a full-stack University Document Management and Verification System using only React.js for the frontend and Node.js with Express.js for the backend. Use PostgreSQL as the database. Keep external library dependencies to a minimum — only use what's absolutely necessary (e.g., file upload middleware, hash generation). Avoid large UI libraries and prefer native or vanilla implementations.
+
+🧩 System Overview
+The system should:
+
+Support secure user login and role-based access
+
+Enable document uploads with SHA-256 hash generation
+
+Handle multi-step approval workflows
+
+Allow digital signing (per role) and comments
+
+Provide a minimal but functional Admin Dashboard
+
+Support public document verification via hash or QR code
+
+🔐 1. Authentication & Role-Based Access
+Implement basic login (username/password or OIDC if required)
+
+Store sessions using express-session (optionally backed by PostgreSQL)
+
+Define user roles:
+
+Student
+
+Academic Staff
+
+Department Head
+
+Dean
+
+Vice Chancellor
+
+Assistant Registrar
+
+Admin
+
+External Verifier (public only, no login)
+
+Enforce access control in:
+
+Backend route permissions
+
+Frontend conditional rendering
+
+📄 2. Document Upload & Integrity Check
+Allow uploading of PDF and DOCX files
+
+Use multer for file handling
+
+On upload:
+
+Validate file size/type manually
+
+Compute SHA-256 hash (use built-in Web Crypto API in browser or minimal Node-compatible lib like sha.js)
+
+Save file to a structured folder (/uploads/<user>/<date>/)
+
+Store metadata (name, hash, user, type, status) in PostgreSQL
+
+🔄 3. Approval Workflow
+Default flow for staff:
+
+pgsql
+Copy
+Edit
+Staff → Head → Dean → VC → [Final role based on document type]
+Transcript requests:
+
+If enrolled → Partial transcript → Signed by Dean
+
+If graduated → Full transcript → Signed by Assistant Registrar
+
+Each user in a step can:
+
+Sign (only in their designated field)
+
+Add comment
+
+Forward without signing
+
+Store all actions with:
+
+User ID, timestamp, comment, and status
+
+Signatures are text records (no digital certs)
+
+🧑‍💼 4. Admin Dashboard
+Create a basic admin panel using plain React (no UI frameworks) to:
+
+User Management
+View/add/edit/delete users
+
+Assign roles and reset passwords
+
+Workflow Management
+Define/edit default workflows for document types
+
+Set step sequences (role-based)
+
+Enable/disable steps
+
+Audit Log
+View document history, user actions, verification logs
+
+🔍 5. Hash Verification Portal
+Public /verify route (no login)
+
+User enters SHA-256 hash or scans QR code
+
+If found:
+
+Show limited metadata (title, signatory, approval date)
+
+Else:
+
+Show "Not verified" message
+
+Generate QR codes using small pure-JS lib (qrcode-generator) or SVG templates
+
+✍ 6. Signing & Comments
+Each role can only sign in its assigned area
+
+Signing is:
+
+User name
+
+Timestamp
+
+Optional comment
+
+Allow forwarding without signing
+
+All activity is saved in PostgreSQL with action history.
