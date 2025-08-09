@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 interface DocumentTableProps {
   documents: Document[];
   isLoading: boolean;
+  onlyApprovedActions?: boolean;
 }
 
-export default function DocumentTable({ documents, isLoading }: DocumentTableProps) {
+export default function DocumentTable({ documents, isLoading, onlyApprovedActions = false }: DocumentTableProps) {
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   if (isLoading) {
     return <div className="text-center py-8">Loading documents...</div>;
@@ -95,27 +96,31 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
                 {new Date(document.createdAt).toLocaleDateString()}
               </TableCell>
               <TableCell>
-                <div className="flex items-center space-x-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPreviewDoc(document)}
-                    data-testid="button-view"
-                    title="View"
-                  >
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                  <a
-                    href={`/api/documents/${document.id}/content?download=1`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Download"
-                  >
-                    <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
-                      <Download className="h-4 w-4" />
+                {(!onlyApprovedActions || document.status === "approved") ? (
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPreviewDoc(document)}
+                      data-testid="button-view"
+                      title="View"
+                    >
+                      <Eye className="h-4 w-4" />
                     </Button>
-                  </a>
-                </div>
+                    <a
+                      href={`/api/documents/${document.id}/content?download=1`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Download"
+                    >
+                      <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-400">Awaiting approval</span>
+                )}
               </TableCell>
             </TableRow>
           ))}

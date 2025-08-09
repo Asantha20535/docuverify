@@ -194,7 +194,7 @@ export default function WorkflowDashboard() {
                             
                             {/* Workflow Progress */}
                             {document.workflow && (
-                              <div className="mt-4">
+                          <div className="mt-4">
                                 <div className="flex items-center space-x-2">
                                   {document.workflow.stepRoles.map((role, index) => {
                                     const isCompleted = index < document.workflow!.currentStep;
@@ -228,9 +228,14 @@ export default function WorkflowDashboard() {
                                           }`} />
                                         )}
                                       </div>
-                                    );
+                                );
                                   })}
                                 </div>
+                            <div className="text-xs text-gray-600 mt-2">
+                              Next: {document.workflow.stepRoles[document.workflow.currentStep + 1] ? 
+                                <span className="font-medium">{formatRoleName(document.workflow.stepRoles[document.workflow.currentStep + 1])}</span> : 
+                                <span className="font-medium">Final approval</span>}
+                            </div>
                               </div>
                             )}
                           </div>
@@ -242,8 +247,14 @@ export default function WorkflowDashboard() {
                           >
                             Review Document
                           </Button>
-                          <Button variant="outline" size="sm">
-                            Download
+                          <Button asChild variant="outline" size="sm">
+                            <a
+                              href={`/api/documents/${document.id}/content?download=1`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Download
+                            </a>
                           </Button>
                         </div>
                       </div>

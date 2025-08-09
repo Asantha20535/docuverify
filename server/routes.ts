@@ -426,7 +426,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/workflow/:workflowId/action", requireAuth, async (req, res) => {
     try {
       const { workflowId } = req.params;
-      const { action, comment } = req.body;
+      const { action, comment, audience, visibility } = req.body as {
+        action?: string;
+        comment?: string;
+        audience?: string;
+        visibility?: string[];
+      };
 
       if (!action) {
         return res.status(400).json({ message: "Action is required" });
@@ -457,13 +462,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid action" });
       }
 
+      // Normalize comment with audience visibility prefix
+      const allowedAudience = new Set(["student", "next_reviewer", "both"]);
+      const audienceTag = allowedAudience.has(String(audience || "").toLowerCase())
+        ? `[aud:${String(audience).toLowerCase()}]`
+        : "";
+      let storedComment: string | null = audienceTag
+        ? `${audienceTag} ${comment || ""}`.trim()
+        : (comment || null);
+
+      if (Array.isArray(visibility) && visibility.length > 0) {
+        const normalized = Array.from(new Set(visibility.map(v => String(v).toLowerCase())));
+        const visTag = `[vis:${normalized.join(",")}]`;
+        storedComment = `${visTag} ${storedComment || ""}`.trim();
+      }
+
       // Create workflow action
       const signature = action === "approve" ? user!.fullName : null;
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: user!.id,
         action: dbAction as any,
-        comment: comment || null,
+        comment: storedComment,
         step: workflow.currentStep,
         signature,
       });

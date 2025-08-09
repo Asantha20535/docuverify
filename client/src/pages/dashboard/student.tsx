@@ -342,7 +342,7 @@ export default function StudentDashboard() {
                 {documentsLoading ? (
                   <div className="text-center py-8">Loading...</div>
                 ) : (
-                  <DocumentTable documents={documents} isLoading={documentsLoading} />
+                  <DocumentTable documents={documents} isLoading={documentsLoading} onlyApprovedActions />
                 )}
               </CardContent>
             </Card>
