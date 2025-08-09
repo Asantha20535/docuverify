@@ -8,13 +8,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Clock, CheckCircle, XCircle, GraduationCap, LogOut, Plus } from "lucide-react";
+import {
+  FileText, Clock, CheckCircle, XCircle, GraduationCap, LogOut, Plus, User
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DocumentTable from "@/components/document-table";
 import { apiRequest } from "@/lib/queryClient";
 import type { Document, DocumentTemplate } from "@/types";
 import { useLocation } from "wouter";
 import { useState } from "react";
+import ProfileSettings from "@/components/profile-settings";
 
 export default function StudentDashboard() {
   const { user, logout } = useAuth();
@@ -135,6 +138,7 @@ export default function StudentDashboard() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600" data-testid="text-username">{user.fullName}</span>
               <Badge variant="secondary">Student</Badge>
+              <ProfileSettings />
               <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
               </Button>

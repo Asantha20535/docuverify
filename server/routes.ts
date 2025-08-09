@@ -36,6 +36,18 @@ const upload = multer({
   },
 });
 
+// Separate image upload for signatures
+const imageUpload = multer({
+  dest: uploadDir,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) return cb(null, true);
+    cb(new Error('Only image files are allowed'));
+  },
+});
+
 // Ensure upload directory exists
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
 
@@ -156,10 +168,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fullName: user.fullName,
         role: user.role,
         isGraduated: user.isGraduated,
+        signature: user.signature || null,
       });
     } catch (error) {
       console.error("Get user error:", error);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Profile update for any authenticated user (self) and admin for anyone
+  app.put("/api/users/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requesterId = req.session.userId!;
+      const requesterRole = req.session.userRole!;
+      if (requesterId !== id && requesterRole !== 'admin') {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const updates: any = {};
+      const { email, fullName } = req.body as { email?: string; fullName?: string };
+      if (email) updates.email = email;
+      if (fullName) updates.fullName = fullName;
+      const updated = await storage.updateUser(id, updates);
+      res.json({ id: updated.id, email: updated.email, fullName: updated.fullName });
+    } catch (error) {
+      console.error('Update profile error:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // Password reset for self (or admin for anyone)
+  app.post("/api/users/:id/reset-password", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requesterId = req.session.userId!;
+      const requesterRole = req.session.userRole!;
+      if (requesterId !== id && requesterRole !== 'admin') {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters' });
+      }
+      // If requester is not admin, verify current password
+      if (requesterRole !== 'admin') {
+        const existing = await storage.getUser(id);
+        if (!existing) {
+          return res.status(404).json({ message: 'User not found' });
+        }
+        if (!currentPassword) {
+          return res.status(400).json({ message: 'Current password is required' });
+        }
+        const ok = await bcrypt.compare(currentPassword, (existing as any).password);
+        if (!ok) {
+          return res.status(401).json({ message: 'Current password is incorrect' });
+        }
+      }
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(id, { password: hashedPassword } as any);
+      res.json({ message: 'Password updated' });
+    } catch (error) {
+      console.error('Reset password error:', error);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
 
@@ -196,7 +266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
-      // Save document metadata and content as base64 for DB storage
+      // Save document metadata
       const document = await storage.createDocument({
         title,
         description: description || null,
@@ -206,11 +276,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
-        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
-        fileMetadata: {
-          originalName: req.file.originalname,
-          storedPath: finalPath,
-        } as any,
         userId: req.session.userId!,
         status: "pending",
       });
@@ -351,10 +416,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/documents", requireAuth, async (req, res) => {
     try {
       const documents = await storage.getUserDocuments(req.session.userId!);
-      res.json(documents);
+      // Hide rejected documents from the owner's view
+      const visible = documents.filter(d => d.status !== "rejected");
+      res.json(visible);
     } catch (error) {
       console.error("Get documents error:", error);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Remove a request/document with role-based rules
+  app.delete("/api/documents/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requesterId = req.session.userId!;
+      const requesterRole = req.session.userRole!;
+
+      const document = await storage.getDocument(id);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      // Role-based removal policy:
+      // - course_unit can remove requests (any request-type items they process)
+      // - staff and above can remove their own document requests
+      // - students can remove their own requests from view (soft removal: mark rejected)
+      const isOwner = document.userId === requesterId;
+      const isCourseUnit = requesterRole === 'course_unit';
+      const isStaffOrAbove = [
+        'academic_staff','department_head','dean','vice_chancellor','assistant_registrar','admin'
+      ].includes(requesterRole);
+
+      if (!(isOwner || isCourseUnit || (isStaffOrAbove && isOwner))) {
+        return res.status(403).json({ message: 'Not authorized to remove this document' });
+      }
+
+      // Soft delete: mark rejected and complete workflow if active
+      const workflow = await storage.getWorkflowByDocumentId(id);
+      if (workflow && !workflow.isCompleted) {
+        await storage.updateWorkflow(workflow.id, { isCompleted: true });
+      }
+      await storage.updateDocument(id, { status: 'rejected' as any });
+      return res.json({ message: 'Request removed' });
+    } catch (error) {
+      console.error('Delete document error:', error);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
 
@@ -609,7 +715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Signature upload route
-  app.post("/api/admin/users/:id/signature", requireAuth, requireRole(["admin"]), upload.single('signature'), async (req, res) => {
+  app.post("/api/admin/users/:id/signature", requireAuth, requireRole(["admin","academic_staff","department_head","dean","vice_chancellor","assistant_registrar"]), imageUpload.single('signature'), async (req, res) => {
     try {
       const { id } = req.params;
       
@@ -857,11 +963,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
-        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
-        fileMetadata: {
-          originalName: req.file.originalname,
-          storedPath: finalPath,
-        } as any,
         status: "pending",
         userId: request.student.id,
       });
@@ -946,11 +1047,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
-        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
-        fileMetadata: {
-          originalName: req.file.originalname,
-          storedPath: req.file.path,
-        } as any,
         status: "pending",
         userId: request.student.id,
       });

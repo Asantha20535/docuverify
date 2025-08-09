@@ -1,10 +1,28 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileText, Download, Eye } from "lucide-react";
+import {
+  FileText, Download, Eye, Trash2
+} from "lucide-react";
 import type { Document } from "@/types";
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface DocumentTableProps {
   documents: Document[];
@@ -13,6 +31,34 @@ interface DocumentTableProps {
 
 export default function DocumentTable({ documents, isLoading }: DocumentTableProps) {
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Document | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      await apiRequest("DELETE", `/api/documents/${documentId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/user"] });
+      toast({
+        title: "Document Removed",
+        description: "The document has been successfully removed.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Removal Failed",
+        description: error.message || "Failed to remove the document.",
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setDeleteTarget(null);
+    },
+  });
+
   if (isLoading) {
     return <div className="text-center py-8">Loading documents...</div>;
   }
@@ -115,6 +161,17 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
                       <Download className="h-4 w-4" />
                     </Button>
                   </a>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteTarget(document)}
+                      data-testid="button-delete"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </AlertDialogTrigger>
                 </div>
               </TableCell>
             </TableRow>
@@ -143,6 +200,26 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
         )}
       </DialogContent>
     </Dialog>
+    <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This action cannot be undone. This will permanently mark the document as rejected.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+            disabled={deleteMutation.isPending}
+            className="bg-red-600 hover:bg-red-700"
+          >
+            {deleteMutation.isPending ? "Removing..." : "Remove"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }

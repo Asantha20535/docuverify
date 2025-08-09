@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, apiRequestWithFormData } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useState } from "react";
+import ProfileSettings from "@/components/profile-settings";
 
 interface DocumentRequest {
   id: string;
@@ -204,6 +205,7 @@ export default function CourseUnitDashboard() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">Welcome, {user.fullName}</span>
+              <ProfileSettings />
               <Button variant="outline" size="sm" onClick={handleLogout}>
                 <LogOut className="w-4 h-4 mr-2" />
                 Logout
