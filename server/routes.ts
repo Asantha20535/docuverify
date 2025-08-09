@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import session from "express-session";
@@ -85,6 +86,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       sameSite: 'lax'
     },
   }));
+
+  // Serve signature images
+  app.use('/uploads/signatures', express.static(path.join(process.cwd(), 'uploads', 'signatures')));
 
   // Authentication middleware
   const requireAuth = (req: any, res: any, next: any) => {
@@ -233,7 +237,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Signature upload for self (non-student users only)
+  app.post("/api/users/:id/signature", requireAuth, imageUpload.single('signature'), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requesterId = req.session.userId!;
+      const requesterRole = req.session.userRole!;
+      
+      // Only allow users to upload their own signature or admins to upload for anyone
+      if (requesterId !== id && requesterRole !== 'admin') {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
 
+      // Non-student users only (except admin can upload for anyone)
+      if (requesterRole === 'student' && requesterId === id) {
+        return res.status(403).json({ message: 'Students cannot upload signatures' });
+      }
+      
+      if (!req.file) {
+        return res.status(400).json({ message: "No signature file uploaded" });
+      }
+
+      // Validate file type
+      if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ message: "Only image files are allowed" });
+      }
+
+      // Create signatures directory if it doesn't exist
+      const signaturesDir = path.join(process.cwd(), "uploads", "signatures");
+      try {
+        await fs.access(signaturesDir);
+      } catch {
+        await fs.mkdir(signaturesDir, { recursive: true });
+      }
+
+      // Move file to signatures directory with proper naming
+      const fileExtension = path.extname(req.file.originalname);
+      const newFilename = `${id}-${Date.now()}${fileExtension}`;
+      const newPath = path.join(signaturesDir, newFilename);
+      
+      await fs.rename(req.file.path, newPath);
+
+      // Update user with signature file path
+      await storage.updateUser(id, { signature: newFilename });
+      
+      res.json({ message: "Signature uploaded successfully", filename: newFilename });
+    } catch (error) {
+      console.error("Upload signature error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
 
   // Document routes - for staff with file uploads
   app.post("/api/documents/upload", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]), upload.single("file"), async (req, res) => {

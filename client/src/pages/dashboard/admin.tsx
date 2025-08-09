@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GraduationCap, LogOut, Users, FileText, Route, Shield } from "lucide-react";
 import UserManagement from "@/components/user-management";
 import WorkflowManagement from "@/components/workflow-management";
+import ProfileSettings from "@/components/profile-settings";
 import type { User, Document } from "@/types";
 import { useLocation } from "wouter";
 
@@ -56,6 +57,7 @@ export default function AdminDashboard() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600" data-testid="text-username">{user.fullName}</span>
               <Badge variant="destructive">Admin</Badge>
+              <ProfileSettings />
               <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
               </Button>
