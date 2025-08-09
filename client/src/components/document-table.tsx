@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FileText, Download, Eye } from "lucide-react";
 import type { Document } from "@/types";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface DocumentTableProps {
   documents: Document[];
@@ -10,6 +12,7 @@ interface DocumentTableProps {
 }
 
 export default function DocumentTable({ documents, isLoading }: DocumentTableProps) {
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   if (isLoading) {
     return <div className="text-center py-8">Loading documents...</div>;
   }
@@ -52,6 +55,7 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
   };
 
   return (
+    <>
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
@@ -92,12 +96,25 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
               </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-2">
-                  <Button variant="ghost" size="sm" data-testid="button-view">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPreviewDoc(document)}
+                    data-testid="button-view"
+                    title="View"
+                  >
                     <Eye className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm" data-testid="button-download">
-                    <Download className="h-4 w-4" />
-                  </Button>
+                  <a
+                    href={`/api/documents/${document.id}/content?download=1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Download"
+                  >
+                    <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </a>
                 </div>
               </TableCell>
             </TableRow>
@@ -105,5 +122,27 @@ export default function DocumentTable({ documents, isLoading }: DocumentTablePro
         </TableBody>
       </Table>
     </div>
+
+    {/* Preview dialog */}
+    <Dialog open={!!previewDoc} onOpenChange={() => setPreviewDoc(null)}>
+      <DialogContent className="max-w-5xl w-full">
+        <DialogHeader>
+          <DialogTitle>{previewDoc?.title || "Document Preview"}</DialogTitle>
+        </DialogHeader>
+        {previewDoc && (
+          (() => {
+            const viewerSrc = `/api/documents/${previewDoc.id}/content`;
+            return (
+              <iframe
+                title="Document Preview"
+                src={viewerSrc}
+                className="w-full h-[80vh] border rounded"
+              />
+            );
+          })()
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

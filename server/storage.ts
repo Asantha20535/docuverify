@@ -147,8 +147,44 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPendingDocumentsForRole(role: string): Promise<(Document & { user: User, workflow: Workflow })[]> {
-    return await db
-      .select()
+    const rows = await db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        description: documents.description,
+        type: documents.type,
+        fileName: documents.fileName,
+        filePath: documents.filePath,
+        fileSize: documents.fileSize,
+        mimeType: documents.mimeType,
+        hash: documents.hash,
+        status: documents.status,
+        userId: documents.userId,
+        createdAt: documents.createdAt,
+        updatedAt: documents.updatedAt,
+        user: {
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          fullName: users.fullName,
+          role: users.role,
+          isActive: users.isActive,
+          isGraduated: users.isGraduated,
+          signature: users.signature,
+          createdAt: users.createdAt,
+          lastLogin: users.lastLogin,
+        },
+        workflow: {
+          id: workflows.id,
+          documentId: workflows.documentId,
+          currentStep: workflows.currentStep,
+          totalSteps: workflows.totalSteps,
+          stepRoles: workflows.stepRoles,
+          isCompleted: workflows.isCompleted,
+          createdAt: workflows.createdAt,
+          updatedAt: workflows.updatedAt,
+        },
+      })
       .from(documents)
       .innerJoin(users, eq(documents.userId, users.id))
       .innerJoin(workflows, eq(documents.id, workflows.documentId))
@@ -158,7 +194,9 @@ export class DatabaseStorage implements IStorage {
           eq(workflows.isCompleted, false)
         )
       )
-      .orderBy(desc(documents.createdAt)) as any;
+      .orderBy(desc(documents.createdAt));
+
+    return rows as any;
   }
 
   async getWorkflow(id: string): Promise<Workflow | undefined> {

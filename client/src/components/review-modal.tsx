@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,16 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
     },
   });
 
+  const isPdf = useMemo(() => {
+    if (!document) return false;
+    return document.mimeType === "application/pdf" || document.fileName?.toLowerCase().endsWith(".pdf");
+  }, [document]);
+
+  const viewerUrl = useMemo(() => {
+    if (!document) return "";
+    return `/api/documents/${document.id}/content`;
+  }, [document]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -85,6 +95,25 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
         </DialogHeader>
         
         <div className="space-y-6">
+          {/* Embedded Preview */}
+          <div className="bg-gray-50 p-2 rounded-lg">
+            <div className="text-sm font-medium mb-2">Document Preview</div>
+            {isPdf ? (
+              <iframe
+                title="Document Preview"
+                src={viewerUrl}
+                className="w-full h-[480px] border rounded"
+              />
+            ) : (
+              <div className="text-sm text-gray-600">Preview not available. Use the link below to open the file.</div>
+            )}
+            <div className="mt-2">
+              <a href={viewerUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-sm underline">
+                Open in new tab
+              </a>
+            </div>
+          </div>
+
           {/* Document Info */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h4 className="font-medium text-gray-900 mb-2">Document Information</h4>

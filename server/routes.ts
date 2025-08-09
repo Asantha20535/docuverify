@@ -183,7 +183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid template selected" });
       }
 
-      // Generate SHA-256 hash
+      // Read file into memory and generate SHA-256 hash
       const fileBuffer = await fs.readFile(req.file.path);
       const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
@@ -196,7 +196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
-      // Save document metadata
+      // Save document metadata and content as base64 for DB storage
       const document = await storage.createDocument({
         title,
         description: description || null,
@@ -206,6 +206,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
+        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
+        fileMetadata: {
+          originalName: req.file.originalname,
+          storedPath: finalPath,
+        } as any,
         userId: req.session.userId!,
         status: "pending",
       });
@@ -353,6 +358,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve document content (binary) for viewing/downloading
+  app.get("/api/documents/:documentId/content", requireAuth, async (req, res) => {
+    try {
+      const { documentId } = req.params;
+      const document = await storage.getDocument(documentId);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      const mimeType = (document as any).mimeType || "application/octet-stream";
+      const fileName = (document as any).fileName || "document";
+      const forceDownload = String((req.query.download ?? "")).toLowerCase() === "1";
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader(
+        "Content-Disposition",
+        `${forceDownload ? "attachment" : "inline"}; filename="${fileName}"`
+      );
+
+      // If stored in DB as base64
+      if ((document as any).fileContent) {
+        const base64 = (document as any).fileContent as unknown as string;
+        const buffer = Buffer.from(base64, "base64");
+        return res.end(buffer);
+      }
+
+      // Else stream from filesystem if path exists
+      if ((document as any).filePath) {
+        try {
+          const buffer = await fs.readFile((document as any).filePath);
+          return res.end(buffer);
+        } catch (e) {
+          // Fall through to 404 below
+        }
+      }
+
+      return res.status(404).json({ message: "Document content not available" });
+    } catch (error) {
+      console.error("Get document content error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/documents/pending", requireAuth, async (req, res) => {
     try {
       const documents = await storage.getPendingDocumentsForRole(req.session.userRole!);
@@ -396,12 +444,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Not authorized for this workflow step" });
       }
 
+      // Normalize client action to DB enum action
+      const dbAction = action === "approve"
+        ? "approved"
+        : action === "forward"
+        ? "forwarded"
+        : action === "reject"
+        ? "rejected"
+        : null;
+
+      if (!dbAction) {
+        return res.status(400).json({ message: "Invalid action" });
+      }
+
       // Create workflow action
       const signature = action === "approve" ? user!.fullName : null;
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: user!.id,
-        action: action as any,
+        action: dbAction as any,
         comment: comment || null,
         step: workflow.currentStep,
         signature,
@@ -773,7 +834,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No workflow template found for this document type" });
       }
 
-      // Generate hash for the uploaded file
+      // Read buffer and generate hash for the uploaded file
       const fileBuffer = await fs.readFile(req.file.path);
       const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
@@ -786,7 +847,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
-      // Create document
+      // Create document with content as base64 for DB storage
       const document = await storage.createDocument({
         title: `${request.type.replace('_', ' ').toUpperCase()} - ${request.student.fullName}`,
         description: `Uploaded ${request.type.replace('_', ' ')} for ${request.student.fullName}. ${comments ? `Comments: ${comments}` : ""}`,
@@ -796,6 +857,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
+        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
+        fileMetadata: {
+          originalName: req.file.originalname,
+          storedPath: finalPath,
+        } as any,
         status: "pending",
         userId: request.student.id,
       });
@@ -866,8 +932,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Transcript request not found" });
       }
 
-      // Generate hash for the uploaded file
-      const hash = crypto.createHash("sha256").update(req.file.buffer).digest("hex");
+      // Generate hash for the uploaded file (read from disk path)
+      const fileBuffer = await fs.readFile(req.file.path);
+      const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
       // Create transcript document
       const transcriptDocument = await storage.createDocument({
@@ -879,6 +946,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
+        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
+        fileMetadata: {
+          originalName: req.file.originalname,
+          storedPath: req.file.path,
+        } as any,
         status: "pending",
         userId: request.student.id,
       });

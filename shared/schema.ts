@@ -69,6 +69,9 @@ export const documents = pgTable("documents", {
   hash: text("hash").notNull().unique(),
   status: documentStatusEnum("status").notNull().default("pending"),
   userId: varchar("user_id").notNull().references(() => users.id),
+  // Optional raw file content stored in DB as base64-encoded text (compat with current Drizzle version)
+  fileContent: text("file_content"),
+  fileMetadata: jsonb("file_metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
