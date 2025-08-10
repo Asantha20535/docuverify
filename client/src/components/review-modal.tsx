@@ -174,8 +174,21 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                     if (parsed.targets && parsed.targets.length > 0) {
                       return !!user && parsed.targets.includes(user.role.toLowerCase());
                     }
-                    if (parsed.audience === "student") return false;
-                    return true;
+                    
+                    // Handle audience-based visibility
+                    if (parsed.audience === "student") {
+                      // Student-only comments: visible to students and all reviewers
+                      return user?.role === "student" || user?.role !== "student";
+                    } else if (parsed.audience === "next_reviewer") {
+                      // Next reviewer comments: visible to all reviewers
+                      return user?.role !== "student";
+                    } else if (parsed.audience === "both") {
+                      // Both comments: visible to everyone
+                      return true;
+                    }
+                    
+                    // Default: show all comments to reviewers, students see non-student comments
+                    return user?.role !== "student" || parsed.audience !== "student";
                   })
                   .map(({ action, parsed }) => (
                     <div key={action.id} className="flex items-start space-x-3">

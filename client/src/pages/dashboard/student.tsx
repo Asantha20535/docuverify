@@ -364,6 +364,7 @@ export default function StudentDashboard() {
                     documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
                     isLoading={documentsLoading}
                     showDeleteButton={true}
+                    onlyApprovedActions={true}
                   />
                 </div>
               </CardContent>
