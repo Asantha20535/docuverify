@@ -178,6 +178,7 @@ export default function AdminDashboard() {
                   <DocumentTable 
                     documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
                     isLoading={false} 
+                    showDeleteButton={true}
                   />
                 </div>
               </CardContent>

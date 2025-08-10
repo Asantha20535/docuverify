@@ -24,6 +24,7 @@ export interface IStorage {
   getUserDocuments(userId: string): Promise<Document[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, updates: Partial<InsertDocument>): Promise<Document>;
+  deleteDocument(id: string, userId: string): Promise<void>;
   getAllDocuments(): Promise<Document[]>;
   getPendingDocumentsForRole(role: string): Promise<(Document & { user: User, workflow: Workflow })[]>;
 
@@ -57,6 +58,7 @@ export interface IStorage {
   getCourseUnitStats(): Promise<{ pendingRequests: number; processedToday: number; totalRequests: number }>;
   getTranscriptRequest(id: string): Promise<any | undefined>;
   getDocumentRequest(id: string): Promise<any | undefined>;
+  deleteDocumentRequest(id: string, userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -140,6 +142,47 @@ export class DatabaseStorage implements IStorage {
       .where(eq(documents.id, id))
       .returning();
     return document;
+  }
+
+  async deleteDocument(id: string, userId: string): Promise<void> {
+    // First get the document to get the file path
+    const document = await db.select().from(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+    
+    if (document.length === 0) {
+      throw new Error("Document not found or access denied");
+    }
+    
+    const doc = document[0];
+    
+    // First get the workflow ID for this document
+    const workflow = await db.select({ id: workflows.id }).from(workflows).where(eq(workflows.documentId, id));
+    
+    if (workflow.length > 0) {
+      const workflowId = workflow[0].id;
+      
+      // Delete related workflow actions first
+      await db.delete(workflowActions).where(eq(workflowActions.workflowId, workflowId));
+      
+      // Delete the workflow
+      await db.delete(workflows).where(eq(workflows.id, workflowId));
+    }
+    
+    // Delete the document from database
+    await db.delete(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+    
+    // Delete the physical file if it exists
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const filePath = path.join(process.cwd(), 'uploads', doc.filePath);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (fileError) {
+      console.warn('Could not delete physical file:', fileError);
+      // Don't fail the operation if file deletion fails
+    }
   }
 
   async getAllDocuments(): Promise<Document[]> {
@@ -488,6 +531,47 @@ export class DatabaseStorage implements IStorage {
       ));
     
     return request || undefined;
+  }
+
+  async deleteDocumentRequest(id: string, userId: string): Promise<void> {
+    // First get the document to get the file path
+    const document = await db.select().from(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+    
+    if (document.length === 0) {
+      throw new Error("Document request not found or access denied");
+    }
+    
+    const doc = document[0];
+    
+    // First get the workflow ID for this document
+    const workflow = await db.select({ id: workflows.id }).from(workflows).where(eq(workflows.documentId, id));
+    
+    if (workflow.length > 0) {
+      const workflowId = workflow[0].id;
+      
+      // Delete related workflow actions first
+      await db.delete(workflowActions).where(eq(workflowActions.workflowId, workflowId));
+      
+      // Delete the workflow
+      await db.delete(workflows).where(eq(workflows.id, workflowId));
+    }
+    
+    // Delete the document from database
+    await db.delete(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+    
+    // Delete the physical file if it exists
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const filePath = path.join(process.cwd(), 'uploads', doc.filePath);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (fileError) {
+      console.warn('Could not delete physical file:', fileError);
+      // Don't fail the operation if file deletion fails
+    }
   }
 }
 

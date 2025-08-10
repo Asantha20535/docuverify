@@ -345,30 +345,27 @@ export default function StudentDashboard() {
           </div>
 
           <div className="lg:col-span-2">
+            {/* Documents Section */}
             <Card>
               <CardHeader>
-                <CardTitle>My Document Requests</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  My Documents
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                {documentsLoading ? (
-                  <div className="text-center py-8">Loading...</div>
-                ) : (
-                  <>
-                    <DocumentSearch
-                      documents={documents}
-                      onSearchChange={setFilteredDocuments}
-                      placeholder="Search your document requests..."
-                      showTypeFilter={true}
-                    />
-                    <div className="mt-6">
-                      <DocumentTable 
-                        documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
-                        isLoading={documentsLoading} 
-                        onlyApprovedActions 
-                      />
-                    </div>
-                  </>
-                )}
+                <DocumentSearch
+                  documents={documents}
+                  onSearchChange={setFilteredDocuments}
+                  placeholder="Search documents..."
+                />
+                <div className="mt-6">
+                  <DocumentTable 
+                    documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
+                    isLoading={documentsLoading}
+                    showDeleteButton={true}
+                  />
+                </div>
               </CardContent>
             </Card>
           </div>

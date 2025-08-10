@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { FileText, Clock, CheckCircle, GraduationCap, LogOut, Upload, User, Calendar, Settings, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, apiRequestWithFormData } from "@/lib/queryClient";
@@ -117,10 +117,12 @@ const WorkflowPath = memo(({ workflow }: { workflow?: { stepRoles: string[]; cur
 // Memoized request item component
 const RequestItem = memo(({ 
   request, 
-  onUploadClick 
+  onUploadClick,
+  onDiscardClick
 }: { 
   request: DocumentRequest; 
   onUploadClick: (request: DocumentRequest) => void;
+  onDiscardClick: (request: DocumentRequest) => void;
 }) => {
   usePerformanceMonitor('RequestItem');
   
@@ -160,6 +162,17 @@ const RequestItem = memo(({
       </div>
 
       <div className="flex justify-end space-x-2">
+        {request.status === "pending" && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onDiscardClick(request)}
+            className="text-red-600 border-red-200 hover:bg-red-50"
+          >
+            <AlertCircle className="w-3 h-3 mr-1" />
+            Discard
+          </Button>
+        )}
         <Button
           size="sm"
           onClick={() => onUploadClick(request)}
@@ -184,6 +197,7 @@ function CourseUnitDashboard() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
   const [filteredRequests, setFilteredRequests] = useState<DocumentRequest[]>([]);
+  const [discardRequest, setDiscardRequest] = useState<DocumentRequest | null>(null);
   const [uploadData, setUploadData] = useState({
     comments: "",
   });
@@ -246,10 +260,20 @@ function CourseUnitDashboard() {
   }, [documentRequests, transcriptRequests]);
 
   // Memoize the upload click handler
-  const handleUploadClick = useCallback((request: DocumentRequest) => {
+  const handleUploadClick = (request: DocumentRequest) => {
     setSelectedRequest(request);
     setIsUploadModalOpen(true);
-  }, []);
+  };
+
+  const handleDiscardClick = (request: DocumentRequest) => {
+    setDiscardRequest(request);
+  };
+
+  const confirmDiscard = () => {
+    if (discardRequest) {
+      discardRequestMutation.mutate(discardRequest.id);
+    }
+  };
 
   // Reset filtered requests when data changes
   useEffect(() => {
@@ -259,18 +283,24 @@ function CourseUnitDashboard() {
   }, [documentRequests, transcriptRequests]);
 
   const uploadDocumentMutation = useMutation({
-    mutationFn: async (data: { requestId: string; file: File; comments: string; documentType: string }) => {
+    mutationFn: async (data: {
+      requestId: string;
+      file: File;
+      comments: string;
+      documentType: string;
+    }) => {
       try {
         const formData = new FormData();
-        formData.append('requestId', data.requestId);
-        formData.append('comments', data.comments);
-
-        const endpoint = data.documentType === 'transcript_request' 
-          ? "/api/course-unit/upload-transcript" 
-          : "/api/course-unit/upload-document";
+        formData.append("requestId", data.requestId);
+        formData.append("comments", data.comments);
         
-        const fieldName = data.documentType === 'transcript_request' ? 'transcript' : 'document';
-        formData.append(fieldName, data.file);
+        let endpoint = "/api/course-unit/upload-document";
+        if (data.documentType === "transcript_request") {
+          endpoint = "/api/course-unit/upload-transcript";
+          formData.append("transcript", data.file);
+        } else {
+          formData.append("document", data.file);
+        }
         
         console.log("Uploading to endpoint:", endpoint);
         const response = await apiRequestWithFormData("POST", endpoint, formData);
@@ -299,6 +329,41 @@ function CourseUnitDashboard() {
       toast({
         title: "Upload Failed",
         description: error.message || "Failed to upload document",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const discardRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      const response = await fetch(`/api/course-unit/requests/${requestId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Discard failed");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Request Discarded",
+        description: "Request has been discarded successfully",
+      });
+      
+      // Invalidate queries to refresh the data
+      queryClient.invalidateQueries({ queryKey: ["/api/course-unit/document-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/course-unit/transcript-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/course-unit/stats"] });
+      setDiscardRequest(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Discard Failed",
+        description: error.message || "Failed to discard request",
         variant: "destructive",
       });
     },
@@ -468,6 +533,7 @@ function CourseUnitDashboard() {
                       key={request.id} 
                       request={request} 
                       onUploadClick={handleUploadClick}
+                      onDiscardClick={handleDiscardClick}
                     />
                   ))}
                 </div>
@@ -541,6 +607,43 @@ function CourseUnitDashboard() {
               </form>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Discard Confirmation Modal */}
+      <Dialog open={!!discardRequest} onOpenChange={() => setDiscardRequest(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard Request</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to discard this request? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            {discardRequest && (
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-2">Request Details</h4>
+                <div className="text-sm text-gray-600 space-y-1">
+                  <p><strong>Title:</strong> {discardRequest.title}</p>
+                  <p><strong>Student:</strong> {discardRequest.student.fullName}</p>
+                  <p><strong>Type:</strong> {discardRequest.type?.replace('_', ' ') || 'Unknown'}</p>
+                  <p><strong>Status:</strong> <StatusBadge status={discardRequest.status} /></p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDiscardRequest(null)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={confirmDiscard}
+              disabled={discardRequestMutation.isPending}
+            >
+              {discardRequestMutation.isPending ? "Discarding..." : "Discard Request"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

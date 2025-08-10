@@ -478,6 +478,7 @@ export default function StaffDashboard() {
                         <DocumentTable 
                           documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
                           isLoading={documentsLoading} 
+                          showDeleteButton={true}
                         />
                       </div>
                     </>

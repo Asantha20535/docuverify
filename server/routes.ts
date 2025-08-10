@@ -379,24 +379,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // If stored in DB as base64
       if ((document as any).fileContent) {
-        const base64 = (document as any).fileContent as unknown as string;
-        const buffer = Buffer.from(base64, "base64");
-        return res.end(buffer);
-      }
-
-      // Else stream from filesystem if path exists
-      if ((document as any).filePath) {
-        try {
-          const buffer = await fs.readFile((document as any).filePath);
-          return res.end(buffer);
-        } catch (e) {
-          // Fall through to 404 below
+        const fileBuffer = Buffer.from((document as any).fileContent, "base64");
+        res.send(fileBuffer);
+      } else {
+        // If stored on disk
+        const filePath = (document as any).filePath;
+        if (filePath && await fs.access(filePath).then(() => true).catch(() => false)) {
+          res.sendFile(filePath);
+        } else {
+          res.status(404).json({ message: "File not found on disk" });
         }
       }
-
-      return res.status(404).json({ message: "Document content not available" });
     } catch (error) {
       console.error("Get document content error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Delete document endpoint
+  app.delete("/api/documents/:documentId", requireAuth, async (req, res) => {
+    try {
+      const { documentId } = req.params;
+      const document = await storage.getDocument(documentId);
+      
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      // Check if user owns the document
+      if (document.userId !== req.session.userId) {
+        return res.status(403).json({ message: "You can only delete your own documents" });
+      }
+
+      // Delete the document
+      await storage.deleteDocument(documentId, req.session.userId!);
+      
+      res.json({ message: "Document deleted successfully" });
+    } catch (error) {
+      console.error("Delete document error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -940,6 +960,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error) {
       console.error("Get course unit stats error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Delete course unit request endpoint
+  app.delete("/api/course-unit/requests/:requestId", requireAuth, async (req, res) => {
+    try {
+      const { requestId } = req.params;
+      const request = await storage.getDocumentRequest(requestId);
+      
+      if (!request) {
+        return res.status(404).json({ message: "Request not found" });
+      }
+
+      // Check if user owns the request
+      if (request.student.id !== req.session.userId) {
+        return res.status(403).json({ message: "You can only delete your own requests" });
+      }
+
+      // Check if request is still pending (can't delete if already processed)
+      if (request.status !== "pending") {
+        return res.status(400).json({ message: "Can only delete pending requests" });
+      }
+
+      // Delete the request
+      await storage.deleteDocumentRequest(requestId, req.session.userId!);
+      
+      res.json({ message: "Request discarded successfully" });
+    } catch (error) {
+      console.error("Delete course unit request error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
