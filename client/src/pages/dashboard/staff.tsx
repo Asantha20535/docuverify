@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { FileText, Clock, CheckCircle, XCircle, Upload, LogOut, Plus, Calendar, Fingerprint, User, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +15,7 @@ import DocumentSearch from "@/components/document-search";
 import ReviewModal from "@/components/review-modal";
 import ProfileSettings from "@/components/profile-settings";
 import { apiRequest } from "@/lib/queryClient";
-import type { Document, DocumentTemplate, DocumentWithDetails } from "@/types";
+import type { Document, DocumentWithDetails } from "@/types";
 import { useLocation } from "wouter";
 import { useState } from "react";
 
@@ -29,7 +29,6 @@ export default function StaffDashboard() {
   const [uploadData, setUploadData] = useState({
     title: "",
     description: "",
-    templateId: "",
     file: null as File | null,
   });
 
@@ -57,9 +56,7 @@ export default function StaffDashboard() {
     return { completed, total, current };
   };
 
-  const { data: templates = [] } = useQuery<DocumentTemplate[]>({
-    queryKey: ["/api/templates"],
-  });
+
 
   const { data: stats } = useQuery<{
     pendingReview: number;
@@ -86,7 +83,7 @@ export default function StaffDashboard() {
         title: "Document Uploaded",
         description: "Your document has been uploaded and entered the approval workflow",
       });
-      setUploadData({ title: "", description: "", templateId: "", file: null });
+      setUploadData({ title: "", description: "", file: null });
       setIsUploadOpen(false);
       queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
@@ -103,7 +100,7 @@ export default function StaffDashboard() {
   const handleUploadDocument = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!uploadData.title.trim() || !uploadData.templateId || !uploadData.file) {
+    if (!uploadData.title.trim() || !uploadData.file) {
       toast({
         title: "Error",
         description: "Please fill in all required fields and select a file",
@@ -115,7 +112,6 @@ export default function StaffDashboard() {
     const formData = new FormData();
     formData.append("title", uploadData.title);
     formData.append("description", uploadData.description);
-    formData.append("templateId", uploadData.templateId);
     formData.append("file", uploadData.file);
 
     uploadDocumentMutation.mutate(formData);
@@ -243,7 +239,7 @@ export default function StaffDashboard() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-gray-600 mb-4">
-                  Upload a document using predefined templates. Each template has a specific approval workflow.
+                  Upload a document for review and approval. The document will be processed through the appropriate workflow.
                 </p>
                 
                 <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
@@ -258,24 +254,7 @@ export default function StaffDashboard() {
                       <DialogTitle>Upload Document</DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleUploadDocument} className="space-y-4">
-                      <div>
-                        <Label htmlFor="template">Document Template</Label>
-                        <Select 
-                          value={uploadData.templateId} 
-                          onValueChange={(value) => setUploadData({ ...uploadData, templateId: value })}
-                        >
-                          <SelectTrigger className="mt-1" data-testid="select-template">
-                            <SelectValue placeholder="Select document template" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {templates.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+
                       <div>
                         <Label htmlFor="title">Document Title</Label>
                         <Input
@@ -331,29 +310,7 @@ export default function StaffDashboard() {
               </CardContent>
             </Card>
 
-            {/* Document Templates Info */}
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle>Available Templates</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {templates.length === 0 ? (
-                  <p className="text-sm text-gray-500">No templates available for your role</p>
-                ) : (
-                  <div className="space-y-2">
-                    {templates.map((template) => (
-                      <div key={template.id} className="p-2 border rounded-md">
-                        <h4 className="font-medium text-sm">{template.name}</h4>
-                        <p className="text-xs text-gray-600">{template.description}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Approval: {template.approvalPath.map(role => formatRoleName(role)).join(" → ")}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+
           </div>
 
           <div className="lg:col-span-2">
