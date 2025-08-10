@@ -8,10 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { FileText, Clock, CheckCircle, XCircle, Upload, LogOut, Plus, Calendar, Fingerprint, User } from "lucide-react";
+import { FileText, Clock, CheckCircle, XCircle, Upload, LogOut, Plus, Calendar, Fingerprint, User, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DocumentTable from "@/components/document-table";
+import DocumentSearch from "@/components/document-search";
 import ReviewModal from "@/components/review-modal";
+import ProfileSettings from "@/components/profile-settings";
 import { apiRequest } from "@/lib/queryClient";
 import type { Document, DocumentTemplate, DocumentWithDetails } from "@/types";
 import { useLocation } from "wouter";
@@ -23,6 +25,7 @@ export default function StaffDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [uploadData, setUploadData] = useState({
     title: "",
     description: "",
@@ -160,6 +163,14 @@ export default function StaffDashboard() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600" data-testid="text-username">{user.fullName}</span>
               <Badge variant="secondary">{formatRoleName(user.role)}</Badge>
+              <ProfileSettings 
+                user={user} 
+                trigger={
+                  <Button variant="ghost" size="sm" title="Profile Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                }
+              />
               <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
               </Button>
@@ -456,7 +467,20 @@ export default function StaffDashboard() {
                   {documentsLoading ? (
                     <div className="text-center py-8">Loading...</div>
                   ) : (
-                    <DocumentTable documents={documents} isLoading={documentsLoading} />
+                    <>
+                      <DocumentSearch
+                        documents={documents}
+                        onSearchChange={setFilteredDocuments}
+                        placeholder="Search your uploaded documents..."
+                        showTypeFilter={true}
+                      />
+                      <div className="mt-6">
+                        <DocumentTable 
+                          documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
+                          isLoading={documentsLoading} 
+                        />
+                      </div>
+                    </>
                   )}
                 </CardContent>
               </Card>

@@ -8,9 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Clock, CheckCircle, XCircle, GraduationCap, LogOut, Plus } from "lucide-react";
+import { FileText, Clock, CheckCircle, XCircle, GraduationCap, LogOut, Plus, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DocumentTable from "@/components/document-table";
+import DocumentSearch from "@/components/document-search";
+import ProfileSettings from "@/components/profile-settings";
 import { apiRequest } from "@/lib/queryClient";
 import type { Document, DocumentTemplate } from "@/types";
 import { useLocation } from "wouter";
@@ -22,6 +24,7 @@ export default function StudentDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isRequestOpen, setIsRequestOpen] = useState(false);
+  const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [documentRequest, setDocumentRequest] = useState({
     documentType: "",
     studentName: "",
@@ -135,6 +138,14 @@ export default function StudentDashboard() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600" data-testid="text-username">{user.fullName}</span>
               <Badge variant="secondary">Student</Badge>
+              <ProfileSettings 
+                user={user} 
+                trigger={
+                  <Button variant="ghost" size="sm" title="Profile Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                }
+              />
               <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
               </Button>
@@ -342,7 +353,21 @@ export default function StudentDashboard() {
                 {documentsLoading ? (
                   <div className="text-center py-8">Loading...</div>
                 ) : (
-                  <DocumentTable documents={documents} isLoading={documentsLoading} onlyApprovedActions />
+                  <>
+                    <DocumentSearch
+                      documents={documents}
+                      onSearchChange={setFilteredDocuments}
+                      placeholder="Search your document requests..."
+                      showTypeFilter={true}
+                    />
+                    <div className="mt-6">
+                      <DocumentTable 
+                        documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
+                        isLoading={documentsLoading} 
+                        onlyApprovedActions 
+                      />
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>

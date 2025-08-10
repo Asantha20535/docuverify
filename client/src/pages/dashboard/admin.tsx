@@ -4,15 +4,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GraduationCap, LogOut, Users, FileText, Route, Shield } from "lucide-react";
+import { GraduationCap, LogOut, Users, FileText, Route, Shield, Settings } from "lucide-react";
 import UserManagement from "@/components/user-management";
 import WorkflowManagement from "@/components/workflow-management";
+import DocumentSearch from "@/components/document-search";
+import DocumentTable from "@/components/document-table";
+import ProfileSettings from "@/components/profile-settings";
 import type { User, Document } from "@/types";
 import { useLocation } from "wouter";
+import { useState } from "react";
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
+  const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
 
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
@@ -56,6 +61,14 @@ export default function AdminDashboard() {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600" data-testid="text-username">{user.fullName}</span>
               <Badge variant="destructive">Admin</Badge>
+              <ProfileSettings
+                user={user}
+                trigger={
+                  <Button variant="ghost" size="sm" title="Profile Settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                }
+              />
               <Button variant="ghost" size="sm" onClick={handleLogout} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
               </Button>
@@ -137,6 +150,7 @@ export default function AdminDashboard() {
           <TabsList>
             <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
             <TabsTrigger value="workflows" data-testid="tab-workflows">Workflows</TabsTrigger>
+            <TabsTrigger value="documents" data-testid="tab-documents">Documents</TabsTrigger>
             <TabsTrigger value="audit" data-testid="tab-audit">Audit Log</TabsTrigger>
           </TabsList>
           
@@ -146,6 +160,28 @@ export default function AdminDashboard() {
           
           <TabsContent value="workflows">
             <WorkflowManagement users={users} />
+          </TabsContent>
+          
+          <TabsContent value="documents">
+            <Card>
+              <CardHeader>
+                <CardTitle>All Documents</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DocumentSearch
+                  documents={documents}
+                  onSearchChange={setFilteredDocuments}
+                  placeholder="Search all documents..."
+                  showTypeFilter={true}
+                />
+                <div className="mt-6">
+                  <DocumentTable 
+                    documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
+                    isLoading={false} 
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
           
           <TabsContent value="audit">

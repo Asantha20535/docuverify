@@ -9,8 +9,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, User, Upload, Trash2, Power, PowerOff } from "lucide-react";
+import { Plus, User, Upload, Trash2, Power, PowerOff, Settings } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import ProfileSettings from "./profile-settings";
 import type { User as UserType } from "@/types";
 
 interface UserManagementProps {
@@ -346,9 +347,19 @@ export default function UserManagement({ users }: UserManagementProps) {
                         <div className="h-10 w-10 bg-gray-300 rounded-full flex items-center justify-center">
                           <User className="text-gray-600" />
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900" data-testid="text-user-name">
-                            {user.fullName}
+                        <div className="ml-4 flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium text-gray-900" data-testid="text-user-name">
+                              {user.fullName}
+                            </div>
+                            <ProfileSettings 
+                              user={user} 
+                              trigger={
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title="Profile Settings">
+                                  <Settings className="w-3 h-3" />
+                                </Button>
+                              }
+                            />
                           </div>
                           <div className="text-sm text-gray-500">{user.email}</div>
                         </div>

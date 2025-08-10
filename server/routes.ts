@@ -628,6 +628,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Profile settings routes
+  app.patch("/api/profile", requireAuth, async (req, res) => {
+    try {
+      const { fullName, email } = req.body;
+      
+      if (!fullName || !email) {
+        return res.status(400).json({ message: "Full name and email are required" });
+      }
+
+      // Check if email is already taken by another user
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser && existingUser.id !== req.session.userId) {
+        return res.status(400).json({ message: "Email is already taken" });
+      }
+
+      const updatedUser = await storage.updateUser(req.session.userId!, {
+        fullName,
+        email,
+      });
+
+      res.json({
+        message: "Profile updated successfully",
+        user: {
+          id: updatedUser.id,
+          username: updatedUser.username,
+          email: updatedUser.email,
+          fullName: updatedUser.fullName,
+          role: updatedUser.role,
+          isGraduated: updatedUser.isGraduated,
+        },
+      });
+    } catch (error) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/profile/password", requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword, confirmPassword } = req.body;
+      
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        return res.status(400).json({ message: "All password fields are required" });
+      }
+
+      if (newPassword !== confirmPassword) {
+        return res.status(400).json({ message: "New passwords do not match" });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters long" });
+      }
+
+      // Get current user and verify current password
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+      if (!isValidPassword) {
+        return res.status(400).json({ message: "Current password is incorrect" });
+      }
+
+      // Hash new password and update
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(req.session.userId!, {
+        password: hashedPassword,
+      });
+
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      console.error("Password change error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/profile/signature", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar", "course_unit"]), upload.single('signature'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No signature file uploaded" });
+      }
+
+      // Validate file type
+      if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ message: "Only image files are allowed" });
+      }
+
+      // Create organized file path for signatures
+      const user = await storage.getUser(req.session.userId!);
+      const datePath = new Date().toISOString().split('T')[0];
+      const signatureDir = path.join(uploadDir, "signatures", user!.username, datePath);
+      await fs.mkdir(signatureDir, { recursive: true });
+      
+      const finalPath = path.join(signatureDir, `${req.file.filename}${path.extname(req.file.originalname)}`);
+      await fs.rename(req.file.path, finalPath);
+
+      // Update user with signature file path
+      await storage.updateUser(req.session.userId!, { signature: finalPath });
+      
+      res.json({ 
+        message: "Signature uploaded successfully", 
+        signaturePath: finalPath 
+      });
+    } catch (error) {
+      console.error("Upload signature error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Signature upload route
   app.post("/api/admin/users/:id/signature", requireAuth, requireRole(["admin"]), upload.single('signature'), async (req, res) => {
     try {
