@@ -446,11 +446,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/workflow/:workflowId/action", requireAuth, async (req, res) => {
     try {
       const { workflowId } = req.params;
-      const { action, comment, audience, visibility } = req.body as {
+      const { action, comment, audience, visibility, signature: signatureData } = req.body as {
         action?: string;
         comment?: string;
         audience?: string;
         visibility?: string[];
+        signature?: string;
       };
 
       if (!action) {
@@ -498,14 +499,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create workflow action
-      const signature = action === "approve" ? user!.fullName : null;
+      const finalSignature = signatureData || (action === "approve" ? user!.fullName : null);
       await storage.createWorkflowAction({
         workflowId: workflow.id,
         userId: user!.id,
         action: dbAction as any,
         comment: storedComment,
         step: workflow.currentStep,
-        signature,
+        signature: finalSignature,
       });
 
       // Update workflow based on action
@@ -1027,11 +1028,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
-      // Create document with content as base64 for DB storage
-      const document = await storage.createDocument({
+      // Update the existing document request with file information instead of creating a new document
+      const updatedDocument = await storage.updateDocument(requestId, {
         title: `${request.type.replace('_', ' ').toUpperCase()} - ${request.student.fullName}`,
         description: `Uploaded ${request.type.replace('_', ' ')} for ${request.student.fullName}. ${comments ? `Comments: ${comments}` : ""}`,
-        type: request.type,
         fileName: req.file.originalname,
         filePath: finalPath,
         fileSize: req.file.size,
@@ -1042,18 +1042,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           originalName: req.file.originalname,
           storedPath: finalPath,
         } as any,
-        status: "pending",
-        userId: request.student.id,
+        status: "in_review",
       });
       
-      // Create workflow using template's approval path
-      const workflow = await storage.createWorkflow({
-        documentId: document.id,
-        currentStep: 0,
-        totalSteps: template.approvalPath.length,
-        stepRoles: template.approvalPath,
-        isCompleted: false,
-      });
+      // Get or create workflow for the existing document
+      let workflow = await storage.getWorkflowByDocumentId(requestId);
+      if (!workflow) {
+        // Create workflow if it doesn't exist
+        workflow = await storage.createWorkflow({
+          documentId: requestId,
+          currentStep: 0,
+          totalSteps: template.approvalPath.length,
+          stepRoles: template.approvalPath,
+          isCompleted: false,
+        });
+      }
 
       // Create initial workflow action (course unit uploaded)
       await storage.createWorkflowAction({
@@ -1064,9 +1067,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         step: 0,
         signature: req.session.userId!,
       });
-
-      // Update original request status to completed
-      await storage.updateDocument(requestId, { status: "completed" });
 
       // Check if course_unit is the first step in the workflow
       // If so, automatically advance to the next step
@@ -1083,12 +1083,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currentStep: nextStep,
             isCompleted: true,
           });
-          await storage.updateDocument(document.id, { status: "approved" });
+          await storage.updateDocument(requestId, { status: "approved" });
         }
       }
-
-      // Update document status to in_review to start the workflow
-      await storage.updateDocument(document.id, { status: "in_review" });
 
       res.json({ message: "Document uploaded and forwarded successfully" });
     } catch (error) {
@@ -1116,23 +1113,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fileBuffer = await fs.readFile(req.file.path);
       const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-      // Create transcript document
-      const transcriptDocument = await storage.createDocument({
+      // Create organized file path
+      const user = await storage.getUser(req.session.userId!);
+      const datePath = new Date().toISOString().split('T')[0];
+      const userDir = path.join(uploadDir, user!.username, datePath);
+      await fs.mkdir(userDir, { recursive: true });
+      
+      const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
+      await fs.rename(req.file.path, finalPath);
+
+      // Update the existing document request with file information instead of creating a new document
+      const updatedDocument = await storage.updateDocument(requestId, {
         title: `Transcript - ${request.student.fullName}`,
         description: `Uploaded transcript for ${request.student.fullName}. ${comments ? `Comments: ${comments}` : ""}`,
-        type: "academic_record",
         fileName: req.file.originalname,
-        filePath: req.file.path,
+        filePath: finalPath,
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
         hash,
         fileContent: Buffer.from(fileBuffer).toString("base64") as any,
         fileMetadata: {
           originalName: req.file.originalname,
-          storedPath: req.file.path,
+          storedPath: finalPath,
         } as any,
-        status: "pending",
-        userId: request.student.id,
+        status: "in_review",
       });
       
       // Get the workflow template for transcript requests
@@ -1141,14 +1145,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No workflow template found for transcript requests" });
       }
       
-      // Create workflow using template's approval path
-      const workflow = await storage.createWorkflow({
-        documentId: transcriptDocument.id,
-        currentStep: 0,
-        totalSteps: template.approvalPath.length,
-        stepRoles: template.approvalPath,
-        isCompleted: false,
-      });
+      // Get or create workflow for the existing document
+      let workflow = await storage.getWorkflowByDocumentId(requestId);
+      if (!workflow) {
+        // Create workflow if it doesn't exist
+        workflow = await storage.createWorkflow({
+          documentId: requestId,
+          currentStep: 0,
+          totalSteps: template.approvalPath.length,
+          stepRoles: template.approvalPath,
+          isCompleted: false,
+        });
+      }
 
       // Create initial workflow action (course unit uploaded)
       await storage.createWorkflowAction({
@@ -1159,9 +1167,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         step: 0,
         signature: req.session.userId!,
       });
-
-      // Update original request status to completed
-      await storage.updateDocument(requestId, { status: "completed" });
 
       // Check if course_unit is the first step in the workflow
       // If so, automatically advance to the next step
@@ -1178,12 +1183,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currentStep: nextStep,
             isCompleted: true,
           });
-          await storage.updateDocument(transcriptDocument.id, { status: "approved" });
+          await storage.updateDocument(requestId, { status: "approved" });
         }
       }
-
-      // Update document status to in_review to start the workflow
-      await storage.updateDocument(transcriptDocument.id, { status: "in_review" });
 
       res.json({ message: "Transcript uploaded and forwarded successfully" });
     } catch (error) {

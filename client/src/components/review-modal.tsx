@@ -8,10 +8,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle, User, Calendar, Fingerprint } from "lucide-react";
+import { CheckCircle, User, Calendar, Fingerprint, PenTool } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import type { DocumentWithDetails } from "@/types";
+import SignaturePad from "./signature-pad";
 
 interface ReviewModalProps {
   document: DocumentWithDetails | null;
@@ -26,9 +27,11 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
   const [comment, setComment] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [visibilityRecipients, setVisibilityRecipients] = useState<string[]>([]);
+  const [signature, setSignature] = useState<string | null>(null);
+  const [showSignaturePad, setShowSignaturePad] = useState(false);
 
   const reviewMutation = useMutation({
-    mutationFn: async (data: { action: string; comment: string; visibility?: string[]; audience?: string }) => {
+    mutationFn: async (data: { action: string; comment: string; visibility?: string[]; audience?: string; signature?: string | null }) => {
       if (!document?.workflow) throw new Error("No workflow found");
       
       const response = await apiRequest("POST", `/api/workflow/${document.workflow.id}/action`, data);
@@ -43,6 +46,8 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
       // Reset form
       setComment("");
       setRejectOpen(false);
+      setSignature(null);
+      setShowSignaturePad(false);
       
       // Refresh data
       queryClient.invalidateQueries({ queryKey: ["/api/documents/pending"] });
@@ -83,11 +88,11 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
   const canReview = !!user && !!currentStepRole && user.role === currentStepRole;
 
   const handleApprove = () => {
-    reviewMutation.mutate({ action: "approve", comment, visibility: visibilityRecipients as any });
+    reviewMutation.mutate({ action: "approve", comment, visibility: visibilityRecipients as any, signature });
   };
 
   const handleForward = () => {
-    reviewMutation.mutate({ action: "forward", comment, visibility: visibilityRecipients as any });
+    reviewMutation.mutate({ action: "forward", comment, visibility: visibilityRecipients as any, signature });
   };
 
   const handleReject = () => {
@@ -178,17 +183,17 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                     // Handle audience-based visibility
                     if (parsed.audience === "student") {
                       // Student-only comments: visible to students and all reviewers
-                      return user?.role === "student" || user?.role !== "student";
+                      return user?.role === "student" || (user?.role && user.role !== "student");
                     } else if (parsed.audience === "next_reviewer") {
                       // Next reviewer comments: visible to all reviewers
-                      return user?.role !== "student";
+                      return user?.role && user.role !== "student";
                     } else if (parsed.audience === "both") {
                       // Both comments: visible to everyone
                       return true;
                     }
                     
                     // Default: show all comments to reviewers, students see non-student comments
-                    return user?.role !== "student" || parsed.audience !== "student";
+                    return (user?.role && user.role !== "student") || (parsed.audience !== "student" && parsed.audience !== "unknown");
                   })
                   .map(({ action, parsed }) => (
                     <div key={action.id} className="flex items-start space-x-3">
@@ -213,6 +218,23 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                             <span className="ml-2 text-xs text-gray-400">[{parsed.audience === "both" ? "visible to student & next reviewer" : parsed.audience === "student" ? "visible to student" : "visible to next reviewer"}]</span>
                           ) : null}
                         </p>
+                        {action.signature && (
+                          <div className="mt-2 p-2 bg-gray-50 rounded border">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <PenTool className="w-4 h-4 text-gray-500" />
+                              <span className="text-xs font-medium text-gray-700">Digital Signature</span>
+                            </div>
+                            {action.signature.startsWith('data:image') ? (
+                              <img 
+                                src={action.signature} 
+                                alt="Digital Signature" 
+                                className="max-w-full h-16 object-contain border rounded"
+                              />
+                            ) : (
+                              <span className="text-sm text-gray-600">{action.signature}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -250,6 +272,50 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                 onChange={(e) => setComment(e.target.value)}
               />
             </div>
+
+            {/* Signature Section */}
+            {user && user.role !== "student" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>Digital Signature</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowSignaturePad(!showSignaturePad)}
+                  >
+                    <PenTool className="w-4 h-4 mr-1" />
+                    {showSignaturePad ? "Hide" : "Add"} Signature
+                  </Button>
+                </div>
+                
+                {showSignaturePad && (
+                  <SignaturePad
+                    onSignatureChange={setSignature}
+                    initialSignature={user.signature || null}
+                    className="border border-gray-200 rounded-lg"
+                  />
+                )}
+                
+                {signature && !showSignaturePad && (
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle className="text-green-600 w-4 h-4" />
+                      <span className="text-sm text-green-700">Signature added to this review</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => setShowSignaturePad(true)}
+                    >
+                      Edit Signature
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <Label>Who can see this comment</Label>
@@ -298,13 +364,13 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                 Cancel
               </Button>
               <Button type="button" onClick={handleForward} variant="secondary" disabled={!canReview || reviewMutation.isPending} data-testid="button-forward">
-                {reviewMutation.isPending ? "Processing..." : "Forward without Signing"}
+                {reviewMutation.isPending ? "Processing..." : `Forward${signature ? " with Signature" : ""}`}
               </Button>
               <Button type="button" onClick={handleApprove} disabled={!canReview || reviewMutation.isPending} data-testid="button-approve">
-                {reviewMutation.isPending ? "Processing..." : "Approve & Forward"}
+                {reviewMutation.isPending ? "Processing..." : `Approve & Forward${signature ? " with Signature" : ""}`}
               </Button>
               <Button type="button" onClick={handleReject} variant="destructive" disabled={!canReview || reviewMutation.isPending} data-testid="button-reject">
-                Reject
+                {reviewMutation.isPending ? "Processing..." : `Reject${signature ? " with Signature" : ""}`}
               </Button>
             </div>
           </div>
@@ -323,7 +389,7 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => reviewMutation.mutate({ action: "reject", comment, visibility: visibilityRecipients as any })} data-testid="confirm-reject">
+          <AlertDialogAction onClick={() => reviewMutation.mutate({ action: "reject", comment, visibility: visibilityRecipients as any, signature })} data-testid="confirm-reject">
             Confirm Reject
           </AlertDialogAction>
         </AlertDialogFooter>
