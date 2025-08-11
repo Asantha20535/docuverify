@@ -309,8 +309,7 @@ export default function VerifyPortal() {
             <div className="mt-6 pt-6 border-t border-blue-200">
               <p className="text-sm text-gray-600 flex items-center">
                 <Phone className="w-4 h-4 mr-2" />
-                For technical support, contact the Registrar's Office at registrar@university.edu or (555) 123-4567
-              </p>
+                For technical support, contact Group D </p>
             </div>
           </CardContent>
         </Card>
