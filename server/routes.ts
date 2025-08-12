@@ -191,25 +191,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
-      // Determine document type and workflow based on template or use default
-      let documentType: "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other" = "other";
-      let stepRoles = ["academic_staff", "department_head", "dean"];
-
-      if (templateId) {
-        const template = await storage.getDocumentTemplate(templateId);
-        if (template) {
-          // Ensure the template type is valid, fallback to "other" if not
-          const validTypes = ["transcript_request", "enrollment_verification", "grade_report", "certificate_verification", "letter_of_recommendation", "academic_record", "degree_verification", "other"];
-          documentType = validTypes.includes(template.type) ? template.type as "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other" : "other";
-          stepRoles = template.approvalPath;
-        }
-      }
-
+      // For staff uploads, make documents private (no workflow, just personal storage)
       // Save document metadata and content as base64 for DB storage
       const document = await storage.createDocument({
         title,
         description: description || null,
-        type: documentType,
+        type: "other",
         fileName: req.file.originalname,
         filePath: finalPath,
         fileSize: req.file.size,
@@ -221,20 +208,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           storedPath: finalPath,
         } as any,
         userId: req.session.userId!,
-        status: "pending",
+        status: "completed", // Mark as completed since no workflow needed
       });
 
-      // Create workflow using determined approval path
-      await storage.createWorkflow({
-        documentId: document.id,
-        currentStep: 0,
-        totalSteps: stepRoles.length,
-        stepRoles,
-        isCompleted: false,
-      });
-
-      // Update document status to in_review
-      await storage.updateDocument(document.id, { status: "in_review" });
+      // No workflow created for staff uploads - documents are private
 
       res.json({ document, hash });
     } catch (error) {
@@ -358,9 +335,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/documents", requireAuth, async (req, res) => {
     try {
-      console.log("Getting documents for user ID:", req.session.userId);
       const documents = await storage.getUserDocuments(req.session.userId!);
-      console.log(`Found ${documents.length} documents for user ${req.session.userId}`);
       res.json(documents);
     } catch (error) {
       console.error("Get documents error:", error);

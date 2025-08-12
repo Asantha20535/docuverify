@@ -234,7 +234,9 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(documents.status, "in_review"),
-          eq(workflows.isCompleted, false)
+          eq(workflows.isCompleted, false),
+          // Exclude documents uploaded by staff (academic_staff, department_head, dean, etc.)
+          sql`${users.role} NOT IN ('academic_staff', 'department_head', 'dean', 'vice_chancellor', 'assistant_registrar')`
         )
       )
       .orderBy(desc(documents.createdAt));
