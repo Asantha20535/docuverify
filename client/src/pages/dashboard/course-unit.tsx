@@ -521,7 +521,21 @@ function CourseUnitDashboard() {
               <>
                 {/* Search and Filter */}
                 <DocumentSearch
-                  documents={searchableDocuments}
+                  documents={searchableDocuments.map(doc => ({
+                    ...doc,
+                    type: [
+                      "transcript_request",
+                      "enrollment_verification",
+                      "grade_report",
+                      "certificate_verification",
+                      "letter_of_recommendation",
+                      "academic_record",
+                      "degree_verification",
+                      "other"
+                    ].includes(doc.type)
+                      ? doc.type
+                      : "other"
+                  }))}
                   onSearchChange={handleSearchChange}
                   placeholder="Search document requests..."
                   showTypeFilter={true}

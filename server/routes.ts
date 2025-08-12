@@ -174,13 +174,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { title, description, templateId } = req.body;
       
-      if (!title || !templateId) {
-        return res.status(400).json({ message: "Title and template are required" });
-      }
-
-      const template = await storage.getDocumentTemplate(templateId);
-      if (!template) {
-        return res.status(400).json({ message: "Invalid template selected" });
+      if (!title) {
+        return res.status(400).json({ message: "Title is required" });
       }
 
       // Read file into memory and generate SHA-256 hash
@@ -196,11 +191,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
       await fs.rename(req.file.path, finalPath);
 
+      // Determine document type and workflow based on template or use default
+      let documentType: "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other" = "other";
+      let stepRoles = ["academic_staff", "department_head", "dean"];
+
+      if (templateId) {
+        const template = await storage.getDocumentTemplate(templateId);
+        if (template) {
+          // Ensure the template type is valid, fallback to "other" if not
+          const validTypes = ["transcript_request", "enrollment_verification", "grade_report", "certificate_verification", "letter_of_recommendation", "academic_record", "degree_verification", "other"];
+          documentType = validTypes.includes(template.type) ? template.type as "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other" : "other";
+          stepRoles = template.approvalPath;
+        }
+      }
+
       // Save document metadata and content as base64 for DB storage
       const document = await storage.createDocument({
         title,
         description: description || null,
-        type: template.type,
+        type: documentType,
         fileName: req.file.originalname,
         filePath: finalPath,
         fileSize: req.file.size,
@@ -215,8 +224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "pending",
       });
 
-      // Create workflow using template's approval path
-      const stepRoles = template.approvalPath;
+      // Create workflow using determined approval path
       await storage.createWorkflow({
         documentId: document.id,
         currentStep: 0,
@@ -350,7 +358,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/documents", requireAuth, async (req, res) => {
     try {
+      console.log("Getting documents for user ID:", req.session.userId);
       const documents = await storage.getUserDocuments(req.session.userId!);
+      console.log(`Found ${documents.length} documents for user ${req.session.userId}`);
       res.json(documents);
     } catch (error) {
       console.error("Get documents error:", error);
