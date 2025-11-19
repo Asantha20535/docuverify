@@ -1,14 +1,16 @@
 import { useState } from "react";
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { GraduationCap, Fingerprint, QrCode, CheckCircle, XCircle, Info, Phone, ArrowLeft } from "lucide-react";
+import { GraduationCap, Fingerprint, QrCode, CheckCircle, XCircle, Info, Phone, ArrowLeft, Upload } from "lucide-react";
 import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { generateSHA256Hash } from "@/lib/crypto";
 
 interface VerificationResult {
   verified: boolean;
@@ -27,6 +29,9 @@ interface VerificationResult {
 export default function VerifyPortal() {
   const [hash, setHash] = useState("");
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
+  const [fileStatus, setFileStatus] = useState<"idle" | "pending" | "success" | "error">("idle");
+  const [fileMessage, setFileMessage] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState("");
   const { toast } = useToast();
 
   const verifyMutation = useMutation({
@@ -70,6 +75,41 @@ export default function VerifyPortal() {
     verifyMutation.mutate(hash);
   };
 
+  const handleFileVerification = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setSelectedFileName(file.name);
+    setFileStatus("pending");
+    setFileMessage("Computing hash and verifying...");
+
+    try {
+      const hash = await generateSHA256Hash(file);
+      const response = await apiRequest("POST", "/api/verify", { hash });
+      const result = await response.json();
+      setVerificationResult(result);
+
+      if (result.verified) {
+        setFileStatus("success");
+        setFileMessage("Document Verified");
+      } else {
+        setFileStatus("error");
+        setFileMessage("Document Not Verified");
+      }
+    } catch (error: any) {
+      setFileStatus("error");
+      const message = error?.message || "Unable to verify document";
+      setFileMessage(message);
+      toast({
+        title: "Verification failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -93,7 +133,7 @@ export default function VerifyPortal() {
       <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">Verify Document Authenticity</h2>
-          <p className="text-lg text-gray-600">Enter a document hash or scan a QR code to verify its authenticity</p>
+          <p className="text-lg text-gray-600">Enter a document hash or upload the original file to verify its authenticity</p>
         </div>
 
         {/* Verification Methods */}
@@ -136,26 +176,48 @@ export default function VerifyPortal() {
             </CardContent>
           </Card>
 
-          {/* QR Code Scanner Method */}
+          {/* Upload Verification */}
           <Card>
             <CardContent className="p-8">
               <div className="text-center mb-6">
                 <div className="mx-auto h-12 w-12 bg-green-100 rounded-full flex items-center justify-center mb-4">
                   <QrCode className="text-green-600 text-xl" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900">QR Code Scanner</h3>
-                <p className="text-sm text-gray-600 mt-2">Scan the QR code on your document</p>
+                <h3 className="text-lg font-semibold text-gray-900">Upload Verification</h3>
+                <p className="text-sm text-gray-600 mt-2">Upload the original document to verify automatically</p>
               </div>
-              
+
               <div className="space-y-4">
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
                   <div className="w-16 h-16 mx-auto bg-gray-100 rounded-lg flex items-center justify-center mb-4">
-                    <QrCode className="text-gray-600 text-xl" />
+                    <Upload className="text-gray-600 text-xl" />
                   </div>
-                  <p className="text-sm text-gray-600 mb-4">Camera scanner will appear here</p>
-                  <Button variant="outline" className="bg-green-600 text-white hover:bg-green-700">
-                    Start Scanner
-                  </Button>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Select the original PDF or image you received from the University. We will hash it locally and compare it with our records.
+                  </p>
+                  <div className="flex justify-center">
+                    <label className="inline-flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md cursor-pointer hover:bg-green-700 transition">
+                      Choose File
+                      <Input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        onChange={handleFileVerification}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  {selectedFileName && (
+                    <p className="text-xs text-gray-500 mt-4">Selected: {selectedFileName}</p>
+                  )}
+                  {fileStatus === "pending" && (
+                    <p className="text-xs text-blue-600 mt-2">Computing hash and verifying...</p>
+                  )}
+                  {fileStatus === "success" && (
+                    <p className="text-sm text-green-600 mt-2 font-medium">{fileMessage}</p>
+                  )}
+                  {fileStatus === "error" && (
+                    <p className="text-sm text-red-600 mt-2 font-medium">{fileMessage}</p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -297,12 +359,12 @@ export default function VerifyPortal() {
                 </ul>
               </div>
               <div>
-                <h4 className="font-medium text-gray-900 mb-2">QR Code Location</h4>
-                <p className="text-gray-600 mb-2">Look for the QR code:</p>
+                <h4 className="font-medium text-gray-900 mb-2">Upload Tips</h4>
+                <p className="text-gray-600 mb-2">For best results:</p>
                 <ul className="list-disc list-inside text-gray-600 space-y-1">
-                  <li>Bottom right corner of documents</li>
-                  <li>On official letterhead</li>
-                  <li>In digital document metadata</li>
+                  <li>Use the original PDF when possible</li>
+                  <li>Avoid scanning photos of prints</li>
+                  <li>Ensure the file hasn’t been modified</li>
                 </ul>
               </div>
             </div>
