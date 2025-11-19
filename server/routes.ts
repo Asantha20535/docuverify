@@ -11,6 +11,7 @@ import path from "path";
 import fs from "fs/promises";
 import { insertUserSchema, insertDocumentSchema, insertWorkflowActionSchema } from "@shared/schema";
 import { z } from "zod";
+import { applySignatureToPdf, parseSignatureDataUrl } from "./signature-service";
 
 declare module "express-session" {
   interface SessionData {
@@ -38,6 +39,49 @@ const upload = multer({
 
 // Ensure upload directory exists
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
+
+const detectMimeTypeFromPath = (filePath: string) => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".svg") return "image/svg+xml";
+  if (ext === ".bmp") return "image/bmp";
+  return "image/png";
+};
+
+const attemptLoadSignatureFile = async (storedValue: string): Promise<string | null> => {
+  const candidates = [
+    storedValue,
+    path.join(uploadDir, storedValue),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const buffer = await fs.readFile(candidate);
+      const mimeType = detectMimeTypeFromPath(candidate);
+      return `data:${mimeType};base64,${buffer.toString("base64")}`;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+};
+
+const ensureSignatureDataUrl = async (userId: string, signatureValue?: string | null): Promise<string | null> => {
+  if (!signatureValue) return null;
+  if (signatureValue.startsWith("data:image")) {
+    return signatureValue;
+  }
+
+  const normalized = await attemptLoadSignatureFile(signatureValue);
+  if (normalized) {
+    await storage.updateUser(userId, { signature: normalized });
+    return normalized;
+  }
+
+  return null;
+};
 
 // Default workflow configurations
 const workflowConfigs = {
@@ -117,6 +161,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       await storage.updateLastLogin(user.id);
 
+      const normalizedSignature = await ensureSignatureDataUrl(user.id, user.signature);
+
       res.json({
         user: {
           id: user.id,
@@ -125,6 +171,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           fullName: user.fullName,
           role: user.role,
           isGraduated: user.isGraduated,
+          signature: normalizedSignature,
+          isActive: user.isActive,
         },
       });
     } catch (error) {
@@ -149,6 +197,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
+      const normalizedSignature = await ensureSignatureDataUrl(user.id, user.signature);
+
       res.json({
         id: user.id,
         username: user.username,
@@ -156,6 +206,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fullName: user.fullName,
         role: user.role,
         isGraduated: user.isGraduated,
+        signature: normalizedSignature,
+        isActive: user.isActive,
       });
     } catch (error) {
       console.error("Get user error:", error);
@@ -427,6 +479,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/documents/:documentId/signature", requireAuth, async (req, res) => {
+    try {
+      const { documentId } = req.params;
+      const { signature } = req.body as { signature?: string };
+
+      if (!signature || !signature.startsWith("data:image")) {
+        return res.status(400).json({ message: "Valid signature data is required" });
+      }
+
+      const [document, workflow, user] = await Promise.all([
+        storage.getDocument(documentId),
+        storage.getWorkflowByDocumentId(documentId),
+        storage.getUser(req.session.userId!),
+      ]);
+
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      if (!workflow) {
+        return res.status(404).json({ message: "Workflow not found for document" });
+      }
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (document.mimeType !== "application/pdf") {
+        return res.status(400).json({ message: "Signature placement supported only for PDF documents" });
+      }
+
+      const currentStepRole = workflow.stepRoles[workflow.currentStep];
+      if (currentStepRole !== user.role) {
+        return res.status(403).json({ message: "Not authorized to sign at this workflow step" });
+      }
+
+      const placementResult = await applySignatureToPdf(document, currentStepRole, signature);
+      if (!placementResult) {
+        return res.status(400).json({ message: "Unable to place signature for this template/role" });
+      }
+
+      await storage.updateDocument(document.id, {
+        hash: placementResult.hash,
+        fileSize: placementResult.buffer.length,
+        fileContent: placementResult.buffer.toString("base64") as any,
+        fileMetadata: placementResult.metadata as any,
+      });
+
+      await storage.createWorkflowAction({
+        workflowId: workflow.id,
+        userId: user.id,
+        action: "signed",
+        comment: null,
+        step: workflow.currentStep,
+        signature,
+      });
+
+      res.json({ message: "Signature applied", hash: placementResult.hash });
+    } catch (error) {
+      console.error("Document signature apply error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Workflow routes
   app.post("/api/workflow/:workflowId/action", requireAuth, async (req, res) => {
     try {
@@ -493,6 +609,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         step: workflow.currentStep,
         signature: finalSignature,
       });
+
+      if (signatureData && signatureData.startsWith("data:image")) {
+        const document = await storage.getDocument(workflow.documentId);
+        if (document && document.mimeType === "application/pdf") {
+          try {
+            const placementResult = await applySignatureToPdf(document, currentStepRole, signatureData);
+            if (placementResult) {
+              await storage.updateDocument(document.id, {
+                hash: placementResult.hash,
+                fileSize: placementResult.buffer.length,
+                fileContent: placementResult.buffer.toString("base64") as any,
+                fileMetadata: placementResult.metadata as any,
+              });
+            }
+          } catch (placementError) {
+            console.error("Signature placement error:", placementError);
+          }
+        }
+      }
 
       // Update workflow based on action
       let updates: any = {};
@@ -711,32 +846,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/profile/signature", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar", "course_unit"]), upload.single('signature'), async (req, res) => {
+  const profileSignatureUploadMiddleware = (req: any, res: any, next: any) => {
+    if (req.is("application/json")) {
+      return next();
+    }
+    upload.single("signature")(req, res, (err) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ message: err.message });
+        }
+        return res.status(400).json({ message: "Signature upload failed" });
+      }
+      next();
+    });
+  };
+
+  const convertFileToDataUrl = async (filePath: string, mimeType: string) => {
+    const buffer = await fs.readFile(filePath);
+    const base64 = buffer.toString("base64");
+    return `data:${mimeType};base64,${base64}`;
+  };
+
+  app.post("/api/profile/signature", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar", "course_unit"]), profileSignatureUploadMiddleware, async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ message: "No signature file uploaded" });
-      }
-
-      // Validate file type
-      if (!req.file.mimetype.startsWith('image/')) {
-        return res.status(400).json({ message: "Only image files are allowed" });
-      }
-
-      // Create organized file path for signatures
       const user = await storage.getUser(req.session.userId!);
-      const datePath = new Date().toISOString().split('T')[0];
-      const signatureDir = path.join(uploadDir, "signatures", user!.username, datePath);
-      await fs.mkdir(signatureDir, { recursive: true });
-      
-      const finalPath = path.join(signatureDir, `${req.file.filename}${path.extname(req.file.originalname)}`);
-      await fs.rename(req.file.path, finalPath);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
-      // Update user with signature file path
-      await storage.updateUser(req.session.userId!, { signature: finalPath });
+      const bodySignature = typeof req.body?.signature === "string" ? req.body.signature : typeof req.body?.signatureData === "string" ? req.body.signatureData : null;
+      let signatureValue: string | null = null;
+
+      if (bodySignature && bodySignature.startsWith("data:image")) {
+        const parsed = parseSignatureDataUrl(bodySignature);
+        if (!parsed) {
+          return res.status(400).json({ message: "Invalid signature data" });
+        }
+        signatureValue = bodySignature;
+      } else if (req.file) {
+        if (!req.file.mimetype.startsWith("image/")) {
+          return res.status(400).json({ message: "Only image files are allowed" });
+        }
+
+        const datePath = new Date().toISOString().split('T')[0];
+        const signatureDir = path.join(uploadDir, "signatures", user.username, datePath);
+        await fs.mkdir(signatureDir, { recursive: true });
+        
+        const finalPath = path.join(signatureDir, `${req.file.filename}${path.extname(req.file.originalname)}`);
+        await fs.rename(req.file.path, finalPath);
+        signatureValue = await convertFileToDataUrl(finalPath, req.file.mimetype);
+      }
+
+      if (!signatureValue) {
+        return res.status(400).json({ message: "No signature provided" });
+      }
+
+      await storage.updateUser(req.session.userId!, { signature: signatureValue });
       
       res.json({ 
-        message: "Signature uploaded successfully", 
-        signaturePath: finalPath 
+        message: "Signature saved successfully", 
+        signature: signatureValue,
       });
     } catch (error) {
       console.error("Upload signature error:", error);
@@ -758,10 +927,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Only image files are allowed" });
       }
 
-      // Update user with signature file path
-      await storage.updateUser(id, { signature: req.file.filename });
+      const signatureDataUrl = await convertFileToDataUrl(req.file.path, req.file.mimetype);
+      await fs.unlink(req.file.path).catch(() => {});
+
+      await storage.updateUser(id, { signature: signatureDataUrl });
       
-      res.json({ message: "Signature uploaded successfully", filename: req.file.filename });
+      res.json({ message: "Signature uploaded successfully", signature: signatureDataUrl });
     } catch (error) {
       console.error("Upload signature error:", error);
       res.status(500).json({ message: "Internal server error" });

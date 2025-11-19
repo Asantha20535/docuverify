@@ -64,6 +64,62 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
     },
   });
 
+  const addSignatureMutation = useMutation({
+    mutationFn: async () => {
+      if (!document) throw new Error("No document selected");
+      if (!signature) throw new Error("Please draw or load a signature first");
+      const response = await apiRequest("POST", `/api/documents/${document.id}/signature`, {
+        signature,
+      });
+      return response.json();
+    },
+    onSuccess: (result) => {
+      toast({
+        title: "Signature Added",
+        description: result?.hash
+          ? `Document updated (hash ${String(result.hash).substring(0, 10)}...)`
+          : "Document updated with signature",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/documents/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Signature Update Failed",
+        description: error.message || "Unable to update document with signature",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const applyStoredSignatureMutation = useMutation({
+    mutationFn: async () => {
+      if (!document) throw new Error("No document selected");
+      if (!user?.signature) throw new Error("Save a signature in your profile before adding it here.");
+      const response = await apiRequest("POST", `/api/documents/${document.id}/signature`, {
+        signature: user.signature,
+      });
+      return response.json();
+    },
+    onSuccess: (result) => {
+      toast({
+        title: "Signature Added",
+        description: result?.hash
+          ? `Document updated (hash ${String(result.hash).substring(0, 10)}...)`
+          : "Document updated with your saved signature",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/documents/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Signature Update Failed",
+        description: error.message || "Unable to add your saved signature",
+        variant: "destructive",
+      });
+    },
+  });
+
   const isPdf = useMemo(() => {
     if (!document) return false;
     return document.mimeType === "application/pdf" || document.fileName?.toLowerCase().endsWith(".pdf");
@@ -140,7 +196,24 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
         <div className="space-y-6">
           {/* Embedded Preview */}
           <div className="bg-gray-50 p-2 rounded-lg">
-            <div className="text-sm font-medium mb-2">Document Preview</div>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="text-sm font-medium">Document Preview</div>
+              {user?.signature ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={!canReview || !isPdf || applyStoredSignatureMutation.isPending}
+                  onClick={() => applyStoredSignatureMutation.mutate()}
+                >
+                  {applyStoredSignatureMutation.isPending ? "Adding..." : "Add Signature"}
+                </Button>
+              ) : (
+                <span className="text-xs text-gray-500">
+                  Save a signature in Profile Settings to enable quick signing.
+                </span>
+              )}
+            </div>
             {isPdf ? (
               <iframe
                 title="Document Preview"
@@ -294,6 +367,16 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
                     onSignatureChange={setSignature}
                     initialSignature={user.signature || null}
                     className="border border-gray-200 rounded-lg"
+                    extraControls={
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!signature || addSignatureMutation.isPending || !canReview}
+                        onClick={() => addSignatureMutation.mutate()}
+                      >
+                        {addSignatureMutation.isPending ? "Applying..." : "Apply Custom Signature"}
+                      </Button>
+                    }
                   />
                 )}
                 

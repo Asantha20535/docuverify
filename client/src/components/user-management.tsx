@@ -468,10 +468,17 @@ export default function UserManagement({ users }: UserManagementProps) {
               </div>
 
               {selectedUser.signature && (
-                <div className="bg-green-50 p-3 rounded-lg">
-                  <p className="text-sm text-green-700">
-                    ✓ Signature already uploaded: {selectedUser.signature}
-                  </p>
+                <div className="bg-green-50 p-3 rounded-lg space-y-2">
+                  <p className="text-sm text-green-700 font-medium">Existing Signature</p>
+                  {selectedUser.signature.startsWith("data:image") ? (
+                    <img
+                      src={selectedUser.signature}
+                      alt="Existing signature"
+                      className="max-w-48 max-h-32 object-contain border bg-white rounded"
+                    />
+                  ) : (
+                    <p className="text-xs text-green-800 break-all">{selectedUser.signature}</p>
+                  )}
                 </div>
               )}
 

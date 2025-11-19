@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, User, Lock, Upload, Eye, EyeOff } from "lucide-react";
+import { Settings, User, Lock, Eye, EyeOff, PenTool } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import type { User as UserType } from "@/types";
+import SignaturePad from "./signature-pad";
 
 interface ProfileSettingsProps {
   user: UserType;
@@ -36,8 +37,15 @@ export default function ProfileSettings({ user, trigger }: ProfileSettingsProps)
     confirmPassword: "",
   });
 
-  const [signatureFile, setSignatureFile] = useState<File | null>(null);
-  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [savedSignature, setSavedSignature] = useState<string | null>(user.signature || null);
+  const [signatureDraft, setSignatureDraft] = useState<string | null>(user.signature || null);
+  const [editingSignature, setEditingSignature] = useState(!user.signature);
+
+  useEffect(() => {
+    setSavedSignature(user.signature || null);
+    setSignatureDraft(user.signature || null);
+    setEditingSignature(!user.signature);
+  }, [user.signature]);
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: typeof profileData) => {
@@ -92,35 +100,31 @@ export default function ProfileSettings({ user, trigger }: ProfileSettingsProps)
     },
   });
 
-  const uploadSignatureMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append('signature', file);
-      
-      const response = await apiRequest("POST", "/api/profile/signature", formData, {
-        headers: {
-          // Don't set Content-Type, let the browser set it with boundary
-        },
+  const saveSignatureMutation = useMutation({
+    mutationFn: async (signatureValue: string) => {
+      const response = await apiRequest("POST", "/api/profile/signature", {
+        signature: signatureValue,
       });
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       toast({
-        title: "Signature Uploaded",
-        description: "Your digital signature has been uploaded successfully",
+        title: "Signature Saved",
+        description: "Your digital signature has been saved successfully",
       });
-      
-      // Reset signature fields
-      setSignatureFile(null);
-      setSignaturePreview(null);
-      
-      // Invalidate user queries to refresh the data
+      setSavedSignature(data.signature);
+      setSignatureDraft(data.signature);
+      setEditingSignature(false);
+      queryClient.setQueryData(["/api/auth/me"], (prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, signature: data.signature };
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
     onError: (error: any) => {
       toast({
-        title: "Upload Failed",
-        description: error.message || "Failed to upload signature",
+        title: "Save Failed",
+        description: error.message || "Failed to save signature",
         variant: "destructive",
       });
     },
@@ -174,33 +178,16 @@ export default function ProfileSettings({ user, trigger }: ProfileSettingsProps)
     changePasswordMutation.mutate(passwordData);
   };
 
-  const handleSignatureUpload = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!signatureFile) {
+  const handleSignatureSave = () => {
+    if (!signatureDraft) {
       toast({
         title: "Error",
-        description: "Please select a signature file",
+        description: "Please draw your signature before saving",
         variant: "destructive",
       });
       return;
     }
-
-    uploadSignatureMutation.mutate(signatureFile);
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSignatureFile(file);
-      
-      // Create preview
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setSignaturePreview(e.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
+    saveSignatureMutation.mutate(signatureDraft);
   };
 
   const formatRoleName = (role: string) => {
@@ -261,7 +248,7 @@ export default function ProfileSettings({ user, trigger }: ProfileSettingsProps)
               </TabsTrigger>
               {canUploadSignature && (
                 <TabsTrigger value="signature" className="flex items-center gap-2">
-                  <Upload className="w-4 h-4" />
+                  <PenTool className="w-4 h-4" />
                   Signature
                 </TabsTrigger>
               )}
@@ -384,51 +371,66 @@ export default function ProfileSettings({ user, trigger }: ProfileSettingsProps)
             {/* Signature Tab */}
             {canUploadSignature && (
               <TabsContent value="signature" className="space-y-4">
-                <form onSubmit={handleSignatureUpload} className="space-y-4">
-                  <div>
-                    <Label htmlFor="signature">Digital Signature</Label>
-                    <Input
-                      id="signature"
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Upload a signature image (PNG, JPG, etc.) for document signing
-                    </p>
-                  </div>
+                <div className="space-y-4">
+                  {savedSignature ? (
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-100">
+                      <p className="text-sm text-gray-700 mb-2">Saved Signature</p>
+                      <img
+                        src={savedSignature}
+                        alt="Saved signature"
+                        className="max-w-64 max-h-32 object-contain border bg-white rounded p-2"
+                      />
+                      <div className="flex justify-end mt-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSignatureDraft(savedSignature);
+                            setEditingSignature(true);
+                          }}
+                        >
+                          Edit Signature
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded-md text-sm">
+                      No signature saved yet. Use the pad below to create one.
+                    </div>
+                  )}
 
-                  {/* Current Signature Display */}
-                  {user.signature && (
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm text-gray-700 mb-2">Current Signature:</p>
-                      <div className="text-xs text-gray-500">
-                        {user.signature.split('/').pop()}
+                  {editingSignature && (
+                    <div className="space-y-4">
+                      <SignaturePad
+                        onSignatureChange={setSignatureDraft}
+                        initialSignature={savedSignature}
+                        className="border border-dashed border-gray-200 rounded-lg"
+                      />
+                      <div className="flex flex-wrap gap-2 justify-end">
+                        <Button
+                          type="button"
+                          onClick={handleSignatureSave}
+                          disabled={!signatureDraft || saveSignatureMutation.isPending}
+                        >
+                          {saveSignatureMutation.isPending ? "Saving..." : "Save Signature"}
+                        </Button>
+                        {savedSignature && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingSignature(false);
+                              setSignatureDraft(savedSignature);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        )}
                       </div>
                     </div>
                   )}
-
-                  {/* Signature Preview */}
-                  {signaturePreview && (
-                    <div className="bg-gray-50 p-3 rounded-lg">
-                      <p className="text-sm text-gray-700 mb-2">Preview:</p>
-                      <img 
-                        src={signaturePreview} 
-                        alt="Signature Preview" 
-                        className="max-w-48 max-h-32 object-contain border rounded"
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex justify-end">
-                    <Button 
-                      type="submit" 
-                      disabled={uploadSignatureMutation.isPending || !signatureFile}
-                    >
-                      {uploadSignatureMutation.isPending ? "Uploading..." : "Upload Signature"}
-                    </Button>
-                  </div>
-                </form>
+                </div>
               </TabsContent>
             )}
           </Tabs>

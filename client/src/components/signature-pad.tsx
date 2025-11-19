@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Undo2, RotateCcw, Download } from "lucide-react";
@@ -7,9 +7,10 @@ interface SignaturePadProps {
   onSignatureChange: (signatureData: string | null) => void;
   initialSignature?: string | null;
   className?: string;
+  extraControls?: ReactNode;
 }
 
-export default function SignaturePad({ onSignatureChange, initialSignature, className = "" }: SignaturePadProps) {
+export default function SignaturePad({ onSignatureChange, initialSignature, className = "", extraControls }: SignaturePadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -214,6 +215,7 @@ export default function SignaturePad({ onSignatureChange, initialSignature, clas
             <Download className="w-4 h-4 mr-1" />
             Download
           </Button>
+          {extraControls}
         </div>
         
         {hasSignature && (
