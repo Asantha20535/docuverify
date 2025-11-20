@@ -57,14 +57,28 @@ export interface DocumentWithDetails extends Document {
   };
 }
 
+export interface SignaturePlacement {
+  page: number;
+  x: number;
+  y: number;
+}
+
+export type SignaturePlacementMap = Record<string, SignaturePlacement[]>;
+
 export interface DocumentTemplate {
   id: string;
   name: string;
-  type: string;
+  type: Document["type"];
   description?: string;
   approvalPath: string[];
   requiredRoles: string[];
   isActive: boolean;
+  templateFileName?: string | null;
+  templateFilePath?: string | null;
+  templateFileSize?: number | null;
+  templateMimeType?: string | null;
+  templatePageCount?: number | null;
+  signaturePlacements?: SignaturePlacementMap;
   createdAt: string;
   updatedAt: string;
 }

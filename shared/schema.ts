@@ -114,6 +114,15 @@ export const documentTemplates = pgTable("document_templates", {
   description: text("description"),
   approvalPath: jsonb("approval_path").notNull().$type<string[]>(),
   requiredRoles: jsonb("required_roles").notNull().$type<string[]>(),
+  templateFileName: text("template_file_name"),
+  templateFilePath: text("template_file_path"),
+  templateFileSize: integer("template_file_size"),
+  templateMimeType: text("template_mime_type"),
+  templatePageCount: integer("template_page_count"),
+  signaturePlacements: jsonb("signature_placements")
+    .notNull()
+    .$type<Record<string, { page: number; x: number; y: number }[]>>()
+    .default(sql`'{}'::jsonb`),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

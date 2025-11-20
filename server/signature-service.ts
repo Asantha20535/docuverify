@@ -16,6 +16,19 @@ export interface SignaturePlacementResult {
   metadata: Record<string, any>;
 }
 
+export interface NormalizedSignaturePlacement {
+  page: number;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const DEFAULT_SIGNATURE_WIDTH = 150;
+const DEFAULT_SIGNATURE_HEIGHT = 56;
+
 const DATA_URL_REGEX = /^data:(?<mime>[^;]+);base64,(?<data>.+)$/;
 
 export const parseSignatureDataUrl = (value: string): ParsedDataUrl | null => {
@@ -77,13 +90,51 @@ const buildMetadata = (document: Document, role: string, block: SignatureBlockDe
   return metadata;
 };
 
-export async function applySignatureToPdf(document: Document, role: string, signatureData: string): Promise<SignaturePlacementResult | null> {
-  if (!signatureData?.startsWith("data:image")) {
-    return null;
+const createBlockFromNormalizedPlacement = (pdfDoc: PDFDocument, placement: NormalizedSignaturePlacement): SignatureBlockDefinition => {
+  const pageIndex = Math.max(0, Math.floor((placement.page ?? 1) - 1));
+  while (pdfDoc.getPageCount() <= pageIndex) {
+    pdfDoc.addPage();
   }
+  const page = pdfDoc.getPage(pageIndex);
+  const pageWidth = page.getWidth();
+  const pageHeight = page.getHeight();
+  const width = placement.width ?? DEFAULT_SIGNATURE_WIDTH;
+  const height = placement.height ?? DEFAULT_SIGNATURE_HEIGHT;
+  const normalizedX = clamp(Number.isFinite(placement.x) ? placement.x : 0.5, 0, 1);
+  const normalizedY = clamp(Number.isFinite(placement.y) ? placement.y : 0.5, 0, 1);
+  const centerX = normalizedX * pageWidth;
+  const centerYFromTop = normalizedY * pageHeight;
+  const centerYFromBottom = pageHeight - centerYFromTop;
+  const drawX = clamp(centerX - width / 2, 0, pageWidth - width);
+  const drawY = clamp(centerYFromBottom - height / 2, 0, pageHeight - height);
+  return {
+    page: pageIndex,
+    x: drawX,
+    y: drawY,
+    width,
+    height,
+  };
+};
 
-  const block = getSignatureBlockForRole(document.type, role);
-  if (!block) {
+const resolveSignatureBlock = (
+  pdfDoc: PDFDocument,
+  documentType: string,
+  role: string,
+  placement?: NormalizedSignaturePlacement,
+): SignatureBlockDefinition | null => {
+  if (placement) {
+    return createBlockFromNormalizedPlacement(pdfDoc, placement);
+  }
+  return getSignatureBlockForRole(documentType, role) ?? null;
+};
+
+export async function applySignatureToPdf(
+  document: Document,
+  role: string,
+  signatureData: string,
+  options?: { normalizedPlacement?: NormalizedSignaturePlacement },
+): Promise<SignaturePlacementResult | null> {
+  if (!signatureData?.startsWith("data:image")) {
     return null;
   }
 
@@ -98,6 +149,10 @@ export async function applySignatureToPdf(document: Document, role: string, sign
   }
 
   const pdfDoc = await PDFDocument.load(existingPdfBytes);
+  const block = resolveSignatureBlock(pdfDoc, document.type, role, options?.normalizedPlacement);
+  if (!block) {
+    return null;
+  }
 
   while (pdfDoc.getPageCount() <= block.page) {
     pdfDoc.addPage();

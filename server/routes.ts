@@ -9,9 +9,12 @@ import crypto from "crypto";
 import multer from "multer";
 import path from "path";
 import fs from "fs/promises";
+import { createReadStream } from "fs";
 import { insertUserSchema, insertDocumentSchema, insertWorkflowActionSchema } from "@shared/schema";
+import type { Document as DbDocument, DocumentTemplate } from "@shared/schema";
 import { z } from "zod";
 import { applySignatureToPdf, parseSignatureDataUrl } from "./signature-service";
+import type { NormalizedSignaturePlacement } from "./signature-service";
 
 declare module "express-session" {
   interface SessionData {
@@ -90,6 +93,115 @@ const workflowConfigs = {
   enrollment_verification: ["academic_staff", "department_head", "dean"],
   grade_report: ["academic_staff", "department_head"],
   other: ["academic_staff", "department_head"],
+};
+
+const parseJsonField = <T>(value: unknown, fallback: T): T => {
+  if (!value) return fallback;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
+};
+
+const normalizeApprovalPath = (value: unknown): string[] => {
+  const parsed = parseJsonField<string[] | undefined>(value, Array.isArray(value) ? (value as string[]) : undefined);
+  if (!parsed) return [];
+  return parsed.filter((role) => typeof role === "string" && role.trim().length > 0);
+};
+
+const normalizeSignaturePlacements = (
+  value: unknown,
+): Record<string, { page: number; x: number; y: number }[]> => {
+  const parsed = parseJsonField<Record<string, any>>(value, {});
+  if (!parsed || typeof parsed !== "object") {
+    return {};
+  }
+
+  const normalized: Record<string, { page: number; x: number; y: number }[]> = {};
+
+  Object.entries(parsed).forEach(([role, placements]) => {
+    if (!Array.isArray(placements)) return;
+    const clean = placements
+      .map((placement) => {
+        const page = Number(placement?.page);
+        const x = Number(placement?.x);
+        const y = Number(placement?.y);
+
+        if (Number.isNaN(page) || Number.isNaN(x) || Number.isNaN(y)) {
+          return null;
+        }
+
+        return {
+          page: page < 1 ? 1 : page,
+          x: Math.min(Math.max(x, 0), 1),
+          y: Math.min(Math.max(y, 0), 1),
+        };
+      })
+      .filter((placement): placement is { page: number; x: number; y: number } => Boolean(placement));
+
+    if (clean.length) {
+      normalized[role] = clean;
+    }
+  });
+
+  return normalized;
+};
+
+const ensureTemplateFileRemoved = async (file?: Express.Multer.File | null) => {
+  if (!file) return;
+  try {
+    await fs.unlink(file.path);
+  } catch {
+    // ignore cleanup errors
+  }
+};
+
+const sanitizeNumber = (value: unknown, fallback: number) =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const selectTemplatePlacementForRole = (
+  template: DocumentTemplate | undefined,
+  document: DbDocument,
+  role: string,
+): NormalizedSignaturePlacement | undefined => {
+  if (!template?.signaturePlacements) {
+    return undefined;
+  }
+
+  const normalizedRole = role?.toLowerCase?.() ? role.toLowerCase() : role;
+  const placements =
+    template.signaturePlacements[role] ??
+    template.signaturePlacements[normalizedRole];
+
+  if (!placements || placements.length === 0) {
+    return undefined;
+  }
+
+  const metadata =
+    document.fileMetadata && typeof document.fileMetadata === "object"
+      ? (document.fileMetadata as Record<string, any>)
+      : null;
+
+  const metadataPlacements = metadata?.signaturePlacements;
+  const history: any[] = Array.isArray(metadataPlacements) ? metadataPlacements : [];
+  const usedCount = history.filter((entry: any) => entry?.role === role).length;
+
+  const selected = placements[Math.min(usedCount, placements.length - 1)];
+  if (!selected) {
+    return undefined;
+  }
+
+  return {
+    page: sanitizeNumber(selected.page, 1),
+    x: sanitizeNumber(selected.x, 0.5),
+    y: sanitizeNumber(selected.y, 0.5),
+    ...(typeof selected.width === "number" ? { width: selected.width } : {}),
+    ...(typeof selected.height === "number" ? { height: selected.height } : {}),
+  };
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -515,7 +627,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Not authorized to sign at this workflow step" });
       }
 
-      const placementResult = await applySignatureToPdf(document, currentStepRole, signature);
+      const template = await storage.getDocumentTemplateByType(document.type);
+      const normalizedPlacement = selectTemplatePlacementForRole(template, document, currentStepRole);
+      const placementResult = await applySignatureToPdf(document, currentStepRole, signature, {
+        normalizedPlacement,
+      });
       if (!placementResult) {
         return res.status(400).json({ message: "Unable to place signature for this template/role" });
       }
@@ -614,7 +730,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const document = await storage.getDocument(workflow.documentId);
         if (document && document.mimeType === "application/pdf") {
           try {
-            const placementResult = await applySignatureToPdf(document, currentStepRole, signatureData);
+            const template = await storage.getDocumentTemplateByType(document.type);
+            const normalizedPlacement = selectTemplatePlacementForRole(template, document, currentStepRole);
+            const placementResult = await applySignatureToPdf(document, currentStepRole, signatureData, {
+              normalizedPlacement,
+            });
             if (placementResult) {
               await storage.updateDocument(document.id, {
                 hash: placementResult.hash,
@@ -1060,21 +1180,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/admin/templates", requireAuth, requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/templates/:id/template", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {
-      const template = await storage.createDocumentTemplate(req.body);
+      const template = await storage.getDocumentTemplate(req.params.id);
+      if (!template || !template.templateFilePath) {
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      const stream = createReadStream(template.templateFilePath);
+      stream.on("error", (error) => {
+        console.error("Read template error:", error);
+        if (!res.headersSent) {
+          res.status(500).json({ message: "Unable to read template file" });
+        }
+      });
+
+      res.setHeader("Content-Type", template.templateMimeType || "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${template.templateFileName || "template.pdf"}"`);
+      stream.pipe(res);
+    } catch (error) {
+      console.error("Download template error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Internal server error" });
+      }
+    }
+  });
+
+  app.post("/api/admin/templates", requireAuth, requireRole(["admin"]), upload.single("templateFile"), async (req, res) => {
+    try {
+      const { name, type } = req.body;
+      const approvalPath = normalizeApprovalPath(req.body.approvalPath);
+      const signaturePlacements = normalizeSignaturePlacements(req.body.signaturePlacements);
+      const templatePageCount = req.body.templatePageCount ? Number(req.body.templatePageCount) : undefined;
+
+      if (!name || !type) {
+        await ensureTemplateFileRemoved(req.file);
+        return res.status(400).json({ message: "Name and document type are required" });
+      }
+
+      if (!approvalPath.length) {
+        await ensureTemplateFileRemoved(req.file);
+        return res.status(400).json({ message: "Approval workflow must include at least one reviewer" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "Template PDF is required" });
+      }
+
+      if (req.file.mimetype !== "application/pdf") {
+        await ensureTemplateFileRemoved(req.file);
+        return res.status(400).json({ message: "Template must be a PDF file" });
+      }
+
+      const missingPlacement = approvalPath.find((role) => !signaturePlacements[role] || signaturePlacements[role].length === 0);
+      if (missingPlacement) {
+        await ensureTemplateFileRemoved(req.file);
+        return res.status(400).json({ message: `Missing signature placement for ${missingPlacement}` });
+      }
+
+      const sanitizedPlacements = approvalPath.reduce((acc, role) => {
+        if (signaturePlacements[role]) {
+          acc[role] = signaturePlacements[role];
+        }
+        return acc;
+      }, {} as Record<string, { page: number; x: number; y: number }[]>);
+
+      const payload = {
+        name,
+        type,
+        description: req.body.description ?? "",
+        approvalPath,
+        requiredRoles: approvalPath,
+        signaturePlacements: sanitizedPlacements,
+        templateFileName: req.file.originalname,
+        templateFilePath: req.file.path,
+        templateFileSize: req.file.size,
+        templateMimeType: req.file.mimetype,
+        templatePageCount: templatePageCount && !Number.isNaN(templatePageCount) ? templatePageCount : undefined,
+      };
+
+      const template = await storage.createDocumentTemplate(payload);
       res.status(201).json(template);
     } catch (error) {
+      await ensureTemplateFileRemoved(req.file);
       console.error("Create template error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.put("/api/admin/templates/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  app.put("/api/admin/templates/:id", requireAuth, requireRole(["admin"]), upload.single("templateFile"), async (req, res) => {
     try {
-      const template = await storage.updateDocumentTemplate(req.params.id, req.body);
+      const existingTemplate = await storage.getDocumentTemplate(req.params.id);
+      if (!existingTemplate) {
+        await ensureTemplateFileRemoved(req.file);
+        return res.status(404).json({ message: "Template not found" });
+      }
+
+      const updates: Record<string, any> = {};
+      let nextApprovalPath = existingTemplate.approvalPath || [];
+
+      if (req.body.name) {
+        updates.name = req.body.name;
+      }
+
+      if (req.body.type) {
+        updates.type = req.body.type;
+      }
+
+      if (req.body.description !== undefined) {
+        updates.description = req.body.description;
+      }
+
+      if (req.body.approvalPath) {
+        const normalized = normalizeApprovalPath(req.body.approvalPath);
+        if (!normalized.length) {
+          await ensureTemplateFileRemoved(req.file);
+          return res.status(400).json({ message: "Approval workflow must include at least one reviewer" });
+        }
+        updates.approvalPath = normalized;
+        updates.requiredRoles = normalized;
+        nextApprovalPath = normalized;
+      }
+
+      if (req.body.signaturePlacements) {
+        const placements = normalizeSignaturePlacements(req.body.signaturePlacements);
+        const missingPlacement = nextApprovalPath.find((role) => !placements[role] || placements[role].length === 0);
+        if (missingPlacement) {
+          await ensureTemplateFileRemoved(req.file);
+          return res.status(400).json({ message: `Missing signature placement for ${missingPlacement}` });
+        }
+        updates.signaturePlacements = nextApprovalPath.reduce((acc, role) => {
+          if (placements[role]) {
+            acc[role] = placements[role];
+          }
+          return acc;
+        }, {} as Record<string, { page: number; x: number; y: number }[]>);
+      }
+
+      if (req.body.templatePageCount) {
+        const parsedPageCount = Number(req.body.templatePageCount);
+        if (!Number.isNaN(parsedPageCount)) {
+          updates.templatePageCount = parsedPageCount;
+        }
+      }
+
+      if (req.file) {
+        if (req.file.mimetype !== "application/pdf") {
+          await ensureTemplateFileRemoved(req.file);
+          return res.status(400).json({ message: "Template must be a PDF file" });
+        }
+        updates.templateFileName = req.file.originalname;
+        updates.templateFilePath = req.file.path;
+        updates.templateFileSize = req.file.size;
+        updates.templateMimeType = req.file.mimetype;
+      }
+
+      const template = await storage.updateDocumentTemplate(req.params.id, updates);
       res.json(template);
     } catch (error) {
+      await ensureTemplateFileRemoved(req.file);
       console.error("Update template error:", error);
       res.status(500).json({ message: "Internal server error" });
     }

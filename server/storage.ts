@@ -46,7 +46,7 @@ export interface IStorage {
   // Document template operations
   getAllDocumentTemplates(): Promise<DocumentTemplate[]>;
   getDocumentTemplate(id: string): Promise<DocumentTemplate | undefined>;
-  getDocumentTemplateByType(type: string): Promise<DocumentTemplate | undefined>;
+  getDocumentTemplateByType(type: DocumentTemplate["type"]): Promise<DocumentTemplate | undefined>;
   getDocumentTemplatesByRole(role: string): Promise<DocumentTemplate[]>;
   createDocumentTemplate(template: InsertDocumentTemplate): Promise<DocumentTemplate>;
   updateDocumentTemplate(id: string, updates: Partial<InsertDocumentTemplate>): Promise<DocumentTemplate>;
@@ -377,7 +377,7 @@ export class DatabaseStorage implements IStorage {
     return template || undefined;
   }
 
-  async getDocumentTemplateByType(type: string): Promise<DocumentTemplate | undefined> {
+  async getDocumentTemplateByType(type: DocumentTemplate["type"]): Promise<DocumentTemplate | undefined> {
     const [template] = await db.select().from(documentTemplates).where(eq(documentTemplates.type, type));
     return template || undefined;
   }
@@ -393,7 +393,8 @@ export class DatabaseStorage implements IStorage {
     const templateData: any = {
       ...insertTemplate,
       approvalPath: Array.isArray(insertTemplate.approvalPath) ? insertTemplate.approvalPath : [],
-      requiredRoles: insertTemplate.requiredRoles || insertTemplate.approvalPath || []
+      requiredRoles: insertTemplate.requiredRoles || insertTemplate.approvalPath || [],
+      signaturePlacements: insertTemplate.signaturePlacements || {}
     };
     
     const [template] = await db
@@ -406,8 +407,12 @@ export class DatabaseStorage implements IStorage {
   async updateDocumentTemplate(id: string, updates: Partial<InsertDocumentTemplate>): Promise<DocumentTemplate> {
     const updateData: any = { 
       ...updates, 
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
+    
+    if (updates.signaturePlacements && typeof updates.signaturePlacements === "object") {
+      updateData.signaturePlacements = updates.signaturePlacements;
+    }
     
     const [template] = await db
       .update(documentTemplates)
