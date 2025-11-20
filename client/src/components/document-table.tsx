@@ -13,13 +13,15 @@ interface DocumentTableProps {
   isLoading: boolean;
   onlyApprovedActions?: boolean;
   showDeleteButton?: boolean;
+  hideActionsColumn?: boolean;
 }
 
 export default function DocumentTable({ 
   documents, 
   isLoading, 
   onlyApprovedActions = false,
-  showDeleteButton = false 
+  showDeleteButton = false,
+  hideActionsColumn = false
 }: DocumentTableProps) {
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   const [deleteDoc, setDeleteDoc] = useState<Document | null>(null);
@@ -121,7 +123,7 @@ export default function DocumentTable({
             <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Uploaded</TableHead>
-            <TableHead>Actions</TableHead>
+            {!hideActionsColumn && <TableHead>Actions</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -151,45 +153,51 @@ export default function DocumentTable({
               <TableCell className="text-sm text-gray-500">
                 {new Date(document.createdAt).toLocaleDateString()}
               </TableCell>
-              <TableCell>
-                {(!onlyApprovedActions || document.status === "approved") ? (
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPreviewDoc(document)}
-                      data-testid="button-view"
-                      title="View"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <a
-                      href={`/api/documents/${document.id}/content?download=1`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="Download"
-                    >
-                      <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </a>
-                    {showDeleteButton && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(document)}
-                        data-testid="button-delete"
-                        title="Delete"
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-xs text-gray-400">Awaiting approval</span>
-                )}
-              </TableCell>
+              {!hideActionsColumn && (
+                <TableCell>
+                  {(!onlyApprovedActions || document.status === "approved" || (showDeleteButton && document.status === "rejected")) ? (
+                    <div className="flex items-center space-x-2">
+                      {!(showDeleteButton && document.status === "rejected") && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPreviewDoc(document)}
+                            data-testid="button-view"
+                            title="View"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <a
+                            href={`/api/documents/${document.id}/content?download=1`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Download"
+                          >
+                            <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </a>
+                        </>
+                      )}
+                      {showDeleteButton && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(document)}
+                          data-testid="button-delete"
+                          title="Delete"
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">Awaiting approval</span>
+                  )}
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>

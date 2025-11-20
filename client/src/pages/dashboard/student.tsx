@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, Clock, CheckCircle, XCircle, GraduationCap, LogOut, Plus, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DocumentTable from "@/components/document-table";
@@ -345,7 +346,7 @@ export default function StudentDashboard() {
           </div>
 
           <div className="lg:col-span-2">
-            {/* Documents Section */}
+            {/* Documents Section with Tabs */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -360,12 +361,71 @@ export default function StudentDashboard() {
                   placeholder="Search documents..."
                 />
                 <div className="mt-6">
-                  <DocumentTable 
-                    documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
-                    isLoading={documentsLoading}
-                    showDeleteButton={true}
-                    onlyApprovedActions={true}
-                  />
+                  {(() => {
+                    const displayDocs = filteredDocuments.length > 0 ? filteredDocuments : documents;
+                    const inReviewDocs = displayDocs.filter(doc => doc.status === "in_review" || doc.status === "pending");
+                    const approvedDocs = displayDocs.filter(doc => doc.status === "approved");
+                    const rejectedDocs = displayDocs.filter(doc => doc.status === "rejected");
+
+                    return (
+                      <Tabs defaultValue="in-review" className="w-full">
+                        <TabsList className="grid w-full grid-cols-3">
+                          <TabsTrigger value="in-review" className="flex items-center gap-2">
+                            <Clock className="h-4 w-4" />
+                            In Review ({inReviewDocs.length})
+                          </TabsTrigger>
+                          <TabsTrigger value="approved" className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4" />
+                            Approved ({approvedDocs.length})
+                          </TabsTrigger>
+                          <TabsTrigger value="rejected" className="flex items-center gap-2">
+                            <XCircle className="h-4 w-4" />
+                            Rejected ({rejectedDocs.length})
+                          </TabsTrigger>
+                        </TabsList>
+                        
+                        <TabsContent value="in-review" className="mt-4">
+                          {inReviewDocs.length === 0 ? (
+                            <p className="text-sm text-gray-500 text-center py-8">No documents in review</p>
+                          ) : (
+                            <DocumentTable 
+                              documents={inReviewDocs} 
+                              isLoading={documentsLoading}
+                              showDeleteButton={false}
+                              onlyApprovedActions={false}
+                              hideActionsColumn={true}
+                            />
+                          )}
+                        </TabsContent>
+                        
+                        <TabsContent value="approved" className="mt-4">
+                          {approvedDocs.length === 0 ? (
+                            <p className="text-sm text-gray-500 text-center py-8">No approved documents</p>
+                          ) : (
+                            <DocumentTable 
+                              documents={approvedDocs} 
+                              isLoading={documentsLoading}
+                              showDeleteButton={true}
+                              onlyApprovedActions={true}
+                            />
+                          )}
+                        </TabsContent>
+                        
+                        <TabsContent value="rejected" className="mt-4">
+                          {rejectedDocs.length === 0 ? (
+                            <p className="text-sm text-gray-500 text-center py-8">No rejected documents</p>
+                          ) : (
+                            <DocumentTable 
+                              documents={rejectedDocs} 
+                              isLoading={documentsLoading}
+                              showDeleteButton={true}
+                              onlyApprovedActions={true}
+                            />
+                          )}
+                        </TabsContent>
+                      </Tabs>
+                    );
+                  })()}
                 </div>
               </CardContent>
             </Card>
