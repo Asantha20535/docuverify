@@ -300,12 +300,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWorkflowActions(workflowId: string): Promise<(WorkflowAction & { user: User })[]> {
-    return await db
-      .select()
+    const rows = await db
+      .select({
+        action: {
+          id: workflowActions.id,
+          workflowId: workflowActions.workflowId,
+          userId: workflowActions.userId,
+          action: workflowActions.action,
+          comment: workflowActions.comment,
+          step: workflowActions.step,
+          signature: workflowActions.signature,
+          createdAt: workflowActions.createdAt,
+        },
+        user: {
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          fullName: users.fullName,
+          role: users.role,
+          isActive: users.isActive,
+          isGraduated: users.isGraduated,
+          signature: users.signature,
+          createdAt: users.createdAt,
+          lastLogin: users.lastLogin,
+        },
+      })
       .from(workflowActions)
       .innerJoin(users, eq(workflowActions.userId, users.id))
       .where(eq(workflowActions.workflowId, workflowId))
-      .orderBy(asc(workflowActions.createdAt)) as any;
+      .orderBy(asc(workflowActions.createdAt));
+
+    return rows.map(({ action, user }) => ({
+      ...action,
+      user: user as User,
+    })) as (WorkflowAction & { user: User })[];
   }
 
   async createVerificationLog(insertLog: InsertVerificationLog): Promise<VerificationLog> {

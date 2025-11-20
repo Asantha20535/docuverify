@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,8 @@ interface ReviewModalProps {
   onClose: () => void;
 }
 
+type WorkflowDetails = NonNullable<DocumentWithDetails["workflow"]>;
+
 export default function ReviewModal({ document, isOpen, onClose }: ReviewModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -26,6 +28,21 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
   const [comment, setComment] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [visibilityRecipients, setVisibilityRecipients] = useState<string[]>([]);
+  const workflowId = document?.workflow?.id;
+
+  const { data: workflowDetails } = useQuery<WorkflowDetails | null>({
+    queryKey: ["/api/workflow", workflowId],
+    queryFn: async () => {
+      if (!workflowId) return null;
+      const response = await apiRequest("GET", `/api/workflow/${workflowId}`);
+      return response.json();
+    },
+    enabled: !!workflowId && isOpen,
+    staleTime: 10_000,
+  });
+
+  const workflowData = workflowDetails ?? document?.workflow ?? null;
+  const workflowActions = workflowData?.actions ?? [];
 
   const reviewMutation = useMutation({
     mutationFn: async (data: { action: string; comment: string; visibility?: string[]; audience?: string }) => {
@@ -43,10 +60,14 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
       // Reset form
       setComment("");
       setRejectOpen(false);
+      setVisibilityRecipients([]);
       
       // Refresh data
       queryClient.invalidateQueries({ queryKey: ["/api/documents/pending"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
+      if (workflowId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/workflow", workflowId] });
+      }
       
       onClose();
     },
@@ -98,24 +119,50 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
   }, [document]);
 
   const nextRole = useMemo(() => {
-    if (!document?.workflow) return null;
-    const nextIndex = document.workflow.currentStep + 1;
-    return document.workflow.stepRoles[nextIndex] ?? null;
-  }, [document]);
+    if (!workflowData) return null;
+    const nextIndex = workflowData.currentStep + 1;
+    return workflowData.stepRoles[nextIndex] ?? null;
+  }, [workflowData]);
 
   const currentStepRole = useMemo(() => {
-    if (!document?.workflow) return null;
-    return document.workflow.stepRoles[document.workflow.currentStep] ?? null;
-  }, [document]);
+    if (!workflowData) return null;
+    return workflowData.stepRoles[workflowData.currentStep] ?? null;
+  }, [workflowData]);
 
   const canReview = !!user && !!currentStepRole && user.role === currentStepRole;
 
+  const buildReviewPayload = (actionType: "approve" | "forward" | "reject") => {
+    const uniqueRecipients = Array.from(new Set(visibilityRecipients));
+    
+    // Only set visibility/audience if recipients are explicitly selected
+    // If no recipients selected, comment is not visible to anyone
+    if (uniqueRecipients.length === 0) {
+      return {
+        action: actionType,
+        comment,
+        visibility: [],
+        audience: undefined,
+      };
+    }
+
+    // Only future reviewers are available as recipients now (no students)
+    // All selected recipients are next reviewers
+    const audience: "next_reviewer" | undefined = uniqueRecipients.length > 0 ? "next_reviewer" : undefined;
+
+    return {
+      action: actionType,
+      comment,
+      visibility: uniqueRecipients,
+      audience,
+    };
+  };
+
   const handleApprove = () => {
-    reviewMutation.mutate({ action: "approve", comment, visibility: visibilityRecipients as any });
+    reviewMutation.mutate(buildReviewPayload("approve"));
   };
 
   const handleForward = () => {
-    reviewMutation.mutate({ action: "forward", comment, visibility: visibilityRecipients as any });
+    reviewMutation.mutate(buildReviewPayload("forward"));
   };
 
   const handleReject = () => {
@@ -133,23 +180,29 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
     raw?: string | null
   ): { audience: "student" | "next_reviewer" | "both" | "unknown"; targets: string[]; text: string } => {
     if (!raw) return { audience: "unknown", targets: [], text: "" };
-    const visMatch = raw.match(/^\[vis:([^\]]+)\]\s*(.*)$/i);
+    
+    let text = raw;
+    let targets: string[] = [];
+    let audience: "student" | "next_reviewer" | "both" | "unknown" = "unknown";
+    
+    // Extract visibility tags [vis:role1,role2]
+    const visMatch = text.match(/\[vis:([^\]]+)\]/i);
     if (visMatch) {
-      const targets = visMatch[1]
+      targets = visMatch[1]
         .split(",")
         .map((s) => s.trim().toLowerCase())
         .filter(Boolean);
-      return { audience: "unknown", targets, text: visMatch[2] ?? "" };
+      text = text.replace(/\[vis:[^\]]+\]\s*/i, "").trim();
     }
-    const audMatch = raw.match(/^\[aud:(student|next_reviewer|both)\]\s*(.*)$/i);
+    
+    // Extract audience tags [aud:student|next_reviewer|both]
+    const audMatch = text.match(/\[aud:(student|next_reviewer|both)\]/i);
     if (audMatch) {
-      return {
-        audience: audMatch[1].toLowerCase() as any,
-        targets: [],
-        text: audMatch[2] ?? "",
-      };
+      audience = audMatch[1].toLowerCase() as any;
+      text = text.replace(/\[aud:(student|next_reviewer|both)\]\s*/i, "").trim();
     }
-    return { audience: "unknown", targets: [], text: raw };
+    
+    return { audience, targets, text };
   };
 
   return (
@@ -209,73 +262,48 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
           </div>
           
           {/* Previous Comments */}
-          {document.workflow && Array.isArray(document.workflow.actions) && document.workflow.actions.length > 0 && (
+          {workflowData && workflowActions.length > 0 && (
             <div>
-              <h4 className="font-medium text-gray-900 mb-3">Workflow History</h4>
-              <div className="space-y-3">
-                {document.workflow!.actions!
+              <h4 className="font-medium text-gray-900 mb-3">Workflow Comments</h4>
+              <div className="space-y-2 text-sm text-gray-700">
+                {workflowActions
+                  .filter((action) => action.action !== "uploaded")
                   .map((action) => ({ action, parsed: parseComment(action.comment) }))
                   .filter(({ parsed }) => {
+                    const text = parsed.text?.trim();
+                    if (!text) {
+                      return false;
+                    }
+
+                    // If visibility targets are explicitly set, only show to those roles
                     if (parsed.targets && parsed.targets.length > 0) {
                       return !!user && parsed.targets.includes(user.role.toLowerCase());
                     }
-                    
-                    // Handle audience-based visibility
+
+                    // Handle audience tags
                     if (parsed.audience === "student") {
-                      // Student-only comments: visible to students and all reviewers
-                      return user?.role === "student" || (user?.role && user.role !== "student");
+                      return user?.role === "student";
                     } else if (parsed.audience === "next_reviewer") {
-                      // Next reviewer comments: visible to all reviewers
                       return user?.role && user.role !== "student";
                     } else if (parsed.audience === "both") {
-                      // Both comments: visible to everyone
                       return true;
                     }
-                    
-                    // Default: show all comments to reviewers, students see non-student comments
-                    return (user?.role && user.role !== "student") || (parsed.audience !== "student" && parsed.audience !== "unknown");
+
+                    // If no visibility targets and no audience tags, hide the comment
+                    // Comments are only visible if recipients were explicitly selected
+                    return false;
                   })
                   .map(({ action, parsed }) => (
-                    <div key={action.id} className="flex items-start space-x-3">
-                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <CheckCircle className="text-green-600 text-xs" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm font-medium text-gray-900">{action.user.fullName}</span>
-                          <Badge variant="secondary" className="text-xs">
-                            {formatRoleName(action.user.role)}
-                          </Badge>
-                          <span className="text-xs text-gray-500">
-                            {new Date(action.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {action.action}: {parsed.text || "No comment provided"}
-                          {parsed.targets.length > 0 ? (
-                            <span className="ml-2 text-xs text-gray-400">[visible to {parsed.targets.join(", ")}]</span>
-                          ) : parsed.audience !== "unknown" ? (
-                            <span className="ml-2 text-xs text-gray-400">[{parsed.audience === "both" ? "visible to student & next reviewer" : parsed.audience === "student" ? "visible to student" : "visible to next reviewer"}]</span>
-                          ) : null}
-                        </p>
-                        {action.signature && (
-                          <div className="mt-2 p-2 bg-gray-50 rounded border">
-                            <div className="flex items-center space-x-2 mb-1">
-                              <PenTool className="w-4 h-4 text-gray-500" />
-                              <span className="text-xs font-medium text-gray-700">Digital Signature</span>
-                            </div>
-                            {action.signature.startsWith('data:image') ? (
-                              <img 
-                                src={action.signature} 
-                                alt="Digital Signature" 
-                                className="max-w-full h-16 object-contain border rounded"
-                              />
-                            ) : (
-                              <span className="text-sm text-gray-600">{action.signature}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                    <div
+                      key={action.id}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2"
+                    >
+                      <p className="font-medium text-gray-900">
+                        {formatRoleName(action.user.role)}:
+                        <span className="ml-1 text-gray-700">
+                          {parsed.text?.trim()}
+                        </span>
+                      </p>
                     </div>
                   ))}
               </div>
@@ -316,22 +344,15 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
             <div>
               <Label>Who can see this comment</Label>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* Student */}
-                <label className="flex items-center space-x-2 text-sm">
-                  <Checkbox
-                    checked={visibilityRecipients.includes("student")}
-                    onCheckedChange={(checked) => {
-                      setVisibilityRecipients((prev) =>
-                        checked ? Array.from(new Set([...(prev || []), "student"])) : prev.filter((v) => v !== "student")
-                      );
-                    }}
-                  />
-                  <span>Student ({document.user.fullName})</span>
-                </label>
-                {/* Future roles */}
+                {/* Future roles only */}
                 {(() => {
-                  if (!document.workflow) return null;
-                  const futureRoles = Array.from(new Set(document.workflow.stepRoles.slice(document.workflow.currentStep + 1)));
+                  if (!workflowData) return null;
+                  const futureRoles = Array.from(new Set(workflowData.stepRoles.slice(workflowData.currentStep + 1)));
+                  if (futureRoles.length === 0) {
+                    return (
+                      <p className="text-sm text-gray-500">No future reviewers in the workflow. Comment will remain internal.</p>
+                    );
+                  }
                   return futureRoles.map((role) => (
                     <label key={role} className="flex items-center space-x-2 text-sm">
                       <Checkbox
@@ -385,7 +406,7 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => reviewMutation.mutate({ action: "reject", comment, visibility: visibilityRecipients as any })} data-testid="confirm-reject">
+          <AlertDialogAction onClick={() => reviewMutation.mutate(buildReviewPayload("reject"))} data-testid="confirm-reject">
             Confirm Reject
           </AlertDialogAction>
         </AlertDialogFooter>
