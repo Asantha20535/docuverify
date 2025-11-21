@@ -189,7 +189,7 @@ const RequestItem = memo(({
 function CourseUnitDashboard() {
   usePerformanceMonitor('CourseUnitDashboard');
   
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -391,6 +391,15 @@ function CourseUnitDashboard() {
       setLocation("/login");
     }
   };
+
+  // Wait for auth check to complete before redirecting
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   // Early return for authentication
   if (!user) {

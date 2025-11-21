@@ -446,11 +446,12 @@ export default function WorkflowManagement({ users }: WorkflowManagementProps) {
                 Add Workflow
               </Button>
             </DialogTrigger>
-              <DialogContent className="max-w-5xl">
+              <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
               <DialogHeader>
                 <DialogTitle>Add New Workflow Configuration</DialogTitle>
               </DialogHeader>
-                <form onSubmit={handleCreateWorkflow} className="space-y-6">
+                <form onSubmit={handleCreateWorkflow} className="flex flex-col flex-1 min-h-0">
+                  <div className="overflow-y-auto flex-1 pr-2 space-y-6">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <Label htmlFor="workflow-name">Document Type Name</Label>
@@ -727,8 +728,8 @@ export default function WorkflowManagement({ users }: WorkflowManagementProps) {
                       </div>
                     </div>
                   </div>
-
-                  <div className="flex justify-end space-x-2">
+                  </div>
+                  <div className="flex justify-end space-x-2 pt-4 border-t mt-4">
                     <Button type="button" variant="outline" onClick={() => handleAddWorkflowDialogChange(false)}>
                       Cancel
                     </Button>

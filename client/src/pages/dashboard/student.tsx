@@ -20,7 +20,7 @@ import { useLocation } from "wouter";
 import { useState } from "react";
 
 export default function StudentDashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -71,8 +71,6 @@ export default function StudentDashboard() {
       setIsRequestOpen(false);
       queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/user"] });
-      // Redirect to course unit page after successful submission
-      setLocation("/dashboard/course-unit");
     },
     onError: (error: any) => {
       toast({
@@ -111,6 +109,15 @@ export default function StudentDashboard() {
   const handleLogout = async () => {
     await logout();
   };
+
+  // Wait for auth check to complete before redirecting
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     setLocation("/login");

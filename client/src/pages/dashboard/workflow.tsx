@@ -11,7 +11,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 
 export default function WorkflowDashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [selectedDocument, setSelectedDocument] = useState<DocumentWithDetails | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -62,6 +62,15 @@ export default function WorkflowDashboard() {
     setSelectedDocument(document);
     setShowReviewModal(true);
   };
+
+  // Wait for auth check to complete before redirecting
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     setLocation("/login");

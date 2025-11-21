@@ -15,7 +15,7 @@ import { useLocation } from "wouter";
 import { useState } from "react";
 
 export default function AdminDashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
 
@@ -30,6 +30,15 @@ export default function AdminDashboard() {
   const handleLogout = async () => {
     await logout();
   };
+
+  // Wait for auth check to complete before redirecting
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     setLocation("/login");

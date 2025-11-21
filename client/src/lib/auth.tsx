@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { User } from "@/types";
@@ -19,6 +19,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const { data: user, isLoading } = useQuery<User | null>({
     queryKey: ["/api/auth/me"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me", {
+        credentials: "include",
+      });
+      if (res.status === 401) {
+        return null;
+      }
+      if (!res.ok) {
+        throw new Error(`Authentication check failed: ${res.status}`);
+      }
+      return res.json();
+    },
     retry: false,
   });
 
