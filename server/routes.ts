@@ -384,6 +384,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Staff document request route (Academic Staff and Department Head only)
+  app.post("/api/documents/request-document-staff", requireAuth, requireRole(["academic_staff", "department_head"]), async (req, res) => {
+    try {
+      const { documentType, name, note } = req.body;
+      
+      if (!documentType || !name) {
+        return res.status(400).json({ message: "Document type and name are required" });
+      }
+
+      // Only allow vacation_request and funding_request
+      if (documentType !== "vacation_request" && documentType !== "funding_request") {
+        return res.status(400).json({ message: "Invalid document type for staff requests" });
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Get the workflow template for this document type
+      const template = await storage.getDocumentTemplateByType(documentType);
+      if (!template) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+
+      // Generate a unique hash for the document request
+      const title = `${documentType === "vacation_request" ? "Vacation Request" : "Funding Request"} - ${name}`;
+      const requestData = `${user.id}-${documentType}-${name}-${Date.now()}`;
+      const hash = crypto.createHash("sha256").update(requestData).digest("hex");
+
+      // Save document metadata with request form details
+      const document = await storage.createDocument({
+        title,
+        description: note || null,
+        type: documentType,
+        fileName: `${documentType}_request.pdf`, // Placeholder filename
+        filePath: "", // No file path for requests
+        fileSize: 0,
+        mimeType: "application/pdf",
+        hash,
+        userId: req.session.userId!,
+        status: "pending",
+        fileMetadata: {
+          name,
+          note: note || null,
+        },
+      });
+
+      // Create workflow using template's approval path
+      await storage.createWorkflow({
+        documentId: document.id,
+        currentStep: 0,
+        totalSteps: template.approvalPath.length,
+        stepRoles: template.approvalPath,
+        isCompleted: false,
+      });
+
+      // Update document status to in_review
+      await storage.updateDocument(document.id, { status: "in_review" });
+
+      res.json({ document, hash });
+    } catch (error) {
+      console.error("Staff document request error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Student document request route
   app.post("/api/documents/request-document", requireAuth, requireRole(["student"]), async (req, res) => {
     try {
@@ -408,7 +475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const requestData = `${user.id}-${documentType}-${title}-${Date.now()}`;
       const hash = crypto.createHash("sha256").update(requestData).digest("hex");
 
-      // Save document metadata
+      // Save document metadata with request form details
       const document = await storage.createDocument({
         title,
         description: description || null,
@@ -420,6 +487,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hash,
         userId: req.session.userId!,
         status: "pending",
+        fileMetadata: {
+          studentName,
+          registrationNumber,
+          email,
+          level,
+        },
       });
 
       // Create workflow using template's approval path
@@ -1228,14 +1301,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Document template routes
   app.get("/api/templates", requireAuth, async (req, res) => {
     try {
-      // For students, show all active templates
+      // For students, show all active templates (excluding staff-only types)
       // For other roles, filter by required roles
       const templates = req.session.userRole === "student" 
         ? await storage.getAllDocumentTemplates()
         : await storage.getDocumentTemplatesByRole(req.session.userRole!);
       
       // Filter to only show active templates
-      const activeTemplates = templates.filter(template => template.isActive);
+      let activeTemplates = templates.filter(template => template.isActive);
+      
+      // For students, exclude vacation_request and funding_request
+      if (req.session.userRole === "student") {
+        activeTemplates = activeTemplates.filter(
+          template => template.type !== "vacation_request" && template.type !== "funding_request"
+        );
+      }
+      
       res.json(activeTemplates);
     } catch (error) {
       console.error("Get templates error:", error);
@@ -1583,6 +1664,149 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Document uploaded and forwarded successfully" });
     } catch (error) {
       console.error("Upload document error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Upload document by first reviewer endpoint (for all roles, not just course_unit)
+  app.post("/api/documents/:documentId/upload-by-reviewer", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar", "course_unit"]), upload.single('document'), async (req, res) => {
+    try {
+      const { documentId } = req.params;
+      const { comments } = req.body;
+      
+      if (!req.file) {
+        return res.status(400).json({ message: "Document file is required" });
+      }
+
+      // Get the document
+      const document = await storage.getDocument(documentId);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      // Get the workflow
+      const workflow = await storage.getWorkflowByDocumentId(documentId);
+      if (!workflow) {
+        return res.status(404).json({ message: "Workflow not found" });
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if user is the first reviewer (currentStep === 0)
+      if (workflow.currentStep !== 0) {
+        return res.status(403).json({ message: "You can only upload documents as the first reviewer" });
+      }
+
+      // Check if user's role matches the first step role
+      const firstStepRole = workflow.stepRoles[0];
+      if (user.role !== firstStepRole) {
+        return res.status(403).json({ message: "You are not authorized to upload this document" });
+      }
+
+      // Check if document comes directly from requester (not forwarded)
+      if (document.forwardedToUserId || document.forwardedFromUserId) {
+        return res.status(400).json({ message: "Cannot upload document that was forwarded" });
+      }
+
+      // Check if document already has a file uploaded by a reviewer
+      // Check workflow actions to see if someone already uploaded
+      const workflowActions = await storage.getWorkflowActions(workflow.id);
+      const hasUploadAction = workflowActions.some(action => action.action === "uploaded");
+      if (hasUploadAction) {
+        return res.status(400).json({ message: "Document already has an uploaded file from a previous reviewer" });
+      }
+      
+      // Also check if document has a real file (not just a placeholder from request)
+      // Request documents typically have empty filePath or fileSize 0, or placeholder filenames
+      // If filePath exists, is not empty, fileSize > 0, and filename doesn't look like a placeholder
+      if (document.filePath && document.filePath !== "" && document.fileSize > 0) {
+        // Check if filename looks like a placeholder (e.g., ends with "_request.pdf")
+        const isPlaceholder = document.fileName.includes("_request") || document.fileName.includes("request");
+        if (!isPlaceholder) {
+          // This might be a real file, but we'll allow if no upload action exists
+          // The upload action check above is the primary validation
+        }
+      }
+
+      // Get the workflow template for this document type
+      const template = await storage.getDocumentTemplateByType(document.type);
+      if (!template) {
+        return res.status(400).json({ message: "No workflow template found for this document type" });
+      }
+
+      // Read buffer and generate hash for the uploaded file
+      const fileBuffer = await fs.readFile(req.file.path);
+      const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+
+      // Create organized file path
+      const datePath = new Date().toISOString().split('T')[0];
+      const userDir = path.join(uploadDir, user.username, datePath);
+      await fs.mkdir(userDir, { recursive: true });
+      
+      const finalPath = path.join(userDir, `${hash}${path.extname(req.file.originalname)}`);
+      await fs.rename(req.file.path, finalPath);
+
+      // Get the requester user info
+      const requester = await storage.getUser(document.userId);
+      const requesterName = requester?.fullName || "Unknown";
+
+      // Update the document with file information
+      const updatedDocument = await storage.updateDocument(documentId, {
+        title: `${document.type.replace('_', ' ').toUpperCase()} - ${requesterName}`,
+        description: `Uploaded ${document.type.replace('_', ' ')} for ${requesterName}. ${comments ? `Comments: ${comments}` : ""}`,
+        fileName: req.file.originalname,
+        filePath: finalPath,
+        fileSize: req.file.size,
+        mimeType: req.file.mimetype,
+        hash,
+        fileContent: Buffer.from(fileBuffer).toString("base64") as any,
+        fileMetadata: {
+          originalName: req.file.originalname,
+          storedPath: finalPath,
+          uploadedBy: user.id,
+          uploadedAt: new Date().toISOString(),
+        } as any,
+        status: "in_review",
+      });
+
+      // Create workflow action (reviewer uploaded)
+      await storage.createWorkflowAction({
+        workflowId: workflow.id,
+        userId: req.session.userId!,
+        action: "uploaded",
+        comment: `${document.type.replace('_', ' ')} uploaded. ${comments ? `Comments: ${comments}` : ""}`,
+        step: 0,
+        signature: req.session.userId!,
+      });
+
+      // Only automatically advance if the first reviewer is course_unit
+      // For other roles, they need to explicitly approve/forward through the review modal
+      if (firstStepRole === "course_unit") {
+        // Auto-advance to next step since course unit already uploaded
+        const nextStep = 1;
+        if (nextStep < workflow.totalSteps) {
+          await storage.updateWorkflow(workflow.id, {
+            currentStep: nextStep,
+          });
+        } else {
+          // Workflow completed if course_unit was the only step
+          await storage.updateWorkflow(workflow.id, {
+            currentStep: nextStep,
+            isCompleted: true,
+          });
+          await storage.updateDocument(documentId, { status: "approved" });
+        }
+        res.json({ message: "Document uploaded and forwarded successfully" });
+      } else {
+        // For non-course_unit first reviewers, keep document at current step
+        // They need to review and approve/forward explicitly
+        res.json({ message: "Document uploaded successfully. Please review and approve to forward to the next reviewer." });
+      }
+    } catch (error) {
+      console.error("Upload document by reviewer error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });

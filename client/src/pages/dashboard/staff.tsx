@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { FileText, Clock, CheckCircle, XCircle, Upload, LogOut, Plus, Calendar, Fingerprint, User, Settings } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FileText, Clock, CheckCircle, XCircle, Upload, LogOut, Plus, Calendar, Fingerprint, User, Settings, GraduationCap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DocumentTable from "@/components/document-table";
 import DocumentSearch from "@/components/document-search";
@@ -25,11 +26,17 @@ export default function StaffDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isRequestOpen, setIsRequestOpen] = useState(false);
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [uploadData, setUploadData] = useState({
     title: "",
     description: "",
     file: null as File | null,
+  });
+  const [requestData, setRequestData] = useState({
+    documentType: "",
+    name: "",
+    note: "",
   });
 
   const { data: documents = [], isLoading: documentsLoading } = useQuery<Document[]>({
@@ -41,6 +48,10 @@ export default function StaffDashboard() {
   });
   const [selectedDocument, setSelectedDocument] = useState<DocumentWithDetails | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedDocumentForUpload, setSelectedDocumentForUpload] = useState<DocumentWithDetails | null>(null);
+  const [isReviewerUploadOpen, setIsReviewerUploadOpen] = useState(false);
+  const [reviewerUploadFile, setReviewerUploadFile] = useState<File | null>(null);
+  const [reviewerUploadComments, setReviewerUploadComments] = useState("");
 
   const handleReviewDocument = (document: DocumentWithDetails) => {
     setSelectedDocument(document);
@@ -97,6 +108,136 @@ export default function StaffDashboard() {
     },
   });
 
+  const requestDocumentMutation = useMutation({
+    mutationFn: async (requestData: typeof requestData) => {
+      const response = await apiRequest("POST", "/api/documents/request-document-staff", requestData);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Document Request Submitted",
+        description: "Your document request has been submitted for processing",
+      });
+      setRequestData({ documentType: "", name: "", note: "" });
+      setIsRequestOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Request Failed",
+        description: error.message || "Failed to submit document request",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleRequestDocument = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!requestData.documentType || !requestData.name) {
+      toast({
+        title: "Error",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    requestDocumentMutation.mutate(requestData);
+  };
+
+  // Check if document is eligible for upload by first reviewer
+  const canUploadAsFirstReviewer = (document: DocumentWithDetails): boolean => {
+    if (!document.workflow) return false;
+    
+    // Must be first step (currentStep === 0)
+    if (document.workflow.currentStep !== 0) return false;
+    
+    // Must not be forwarded (document comes directly from requester)
+    if (document.forwardedToUserId || document.forwardedFromUserId) return false;
+    
+    // Requester must be student, academic_staff, or department_head
+    const requesterRole = document.user.role;
+    if (!["student", "academic_staff", "department_head"].includes(requesterRole)) return false;
+    
+    // Check if there's already an upload action in workflow (indicating a reviewer already uploaded)
+    // Note: workflow.actions may not be populated, but backend will validate
+    if (document.workflow.actions && document.workflow.actions.some(action => action.action === "uploaded")) {
+      return false;
+    }
+    
+    // If we reach here, document is eligible
+    // Backend will do final validation (check for existing upload actions, file status, etc.)
+    return true;
+  };
+
+  const reviewerUploadMutation = useMutation({
+    mutationFn: async ({ documentId, file, comments }: { documentId: string; file: File; comments: string }) => {
+      const formData = new FormData();
+      formData.append("document", file);
+      if (comments) {
+        formData.append("comments", comments);
+      }
+      
+      const response = await fetch(`/api/documents/${documentId}/upload-by-reviewer`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Upload failed");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Document Uploaded",
+        description: "Document has been uploaded and forwarded to the next reviewer",
+      });
+      setReviewerUploadFile(null);
+      setReviewerUploadComments("");
+      setSelectedDocumentForUpload(null);
+      setIsReviewerUploadOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/documents/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/workflow"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload document",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleReviewerUpload = (document: DocumentWithDetails) => {
+    setSelectedDocumentForUpload(document);
+    setIsReviewerUploadOpen(true);
+  };
+
+  const handleReviewerUploadSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedDocumentForUpload || !reviewerUploadFile) {
+      toast({
+        title: "Error",
+        description: "Please select a file to upload",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    reviewerUploadMutation.mutate({
+      documentId: selectedDocumentForUpload.id,
+      file: reviewerUploadFile,
+      comments: reviewerUploadComments,
+    });
+  };
+
   const handleUploadDocument = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -128,6 +269,37 @@ export default function StaffDashboard() {
 
   const formatRoleName = (role: string) => {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  };
+
+  // Format and display request details from metadata
+  const getRequestDetails = (document: DocumentWithDetails): string[] => {
+    const details: string[] = [];
+    
+    if (!document.fileMetadata) return details;
+
+    // Student request details
+    if (document.fileMetadata.studentName) {
+      details.push(`Name: ${document.fileMetadata.studentName}`);
+    }
+    if (document.fileMetadata.registrationNumber) {
+      details.push(`Reg No: ${document.fileMetadata.registrationNumber}`);
+    }
+    if (document.fileMetadata.email) {
+      details.push(`Email: ${document.fileMetadata.email}`);
+    }
+    if (document.fileMetadata.level) {
+      details.push(`Level: ${document.fileMetadata.level}`);
+    }
+
+    // Staff request details
+    if (document.fileMetadata.name) {
+      details.push(`Name: ${document.fileMetadata.name}`);
+    }
+    if (document.fileMetadata.note) {
+      details.push(`Note: ${document.fileMetadata.note}`);
+    }
+
+    return details;
   };
 
   // Wait for auth check to complete before redirecting
@@ -239,6 +411,91 @@ export default function StaffDashboard() {
         {/* Document Upload and Review Section */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
+            {/* Request Document - Only for Academic Staff and Department Head */}
+            {(user.role === "academic_staff" || user.role === "department_head") && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <GraduationCap className="h-5 w-5" />
+                    Request Document
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Submit a request for various academic documents. 
+                    Your request will be processed according to the workflow configuration.
+                  </p>
+                  
+                  <Dialog open={isRequestOpen} onOpenChange={setIsRequestOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="w-full" data-testid="button-request-document">
+                        <Plus className="w-4 h-4 mr-2" />
+                        Request Document
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Request Document</DialogTitle>
+                      </DialogHeader>
+                      <form onSubmit={handleRequestDocument} className="space-y-4">
+                        <div>
+                          <Label htmlFor="documentType">Document Type</Label>
+                          <Select 
+                            value={requestData.documentType} 
+                            onValueChange={(value) => setRequestData({ ...requestData, documentType: value })}
+                          >
+                            <SelectTrigger className="mt-1" id="documentType">
+                              <SelectValue placeholder="Select document type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="vacation_request">Vacation Request</SelectItem>
+                              <SelectItem value="funding_request">Funding Request</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="name">Name</Label>
+                          <Input
+                            id="name"
+                            data-testid="input-request-name"
+                            type="text"
+                            required
+                            className="mt-1"
+                            placeholder="Enter your name"
+                            value={requestData.name}
+                            onChange={(e) => setRequestData({ ...requestData, name: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="note">Note</Label>
+                          <Textarea
+                            id="note"
+                            data-testid="input-request-note"
+                            className="mt-1"
+                            placeholder="Enter any additional notes..."
+                            value={requestData.note}
+                            onChange={(e) => setRequestData({ ...requestData, note: e.target.value })}
+                          />
+                        </div>
+                        <div className="flex justify-end space-x-2">
+                          <Button type="button" variant="outline" onClick={() => setIsRequestOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button 
+                            type="submit" 
+                            disabled={requestDocumentMutation.isPending}
+                            data-testid="button-submit-request"
+                          >
+                            {requestDocumentMutation.isPending ? "Submitting..." : "Submit Request"}
+                          </Button>
+                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -363,6 +620,19 @@ export default function StaffDashboard() {
                                     </span>
                                   </div>
 
+                                  {getRequestDetails(document).length > 0 && (
+                                    <div className="mt-3 p-3 bg-gray-50 rounded-md border border-gray-200">
+                                      <div className="text-xs font-semibold text-gray-700 mb-2">Request Details:</div>
+                                      <div className="space-y-1">
+                                        {getRequestDetails(document).map((detail, index) => (
+                                          <div key={index} className="text-xs text-gray-600">
+                                            {detail}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
                                   {document.workflow && (
                                     <div className="mt-4">
                                       <div className="flex items-center space-x-2">
@@ -402,6 +672,15 @@ export default function StaffDashboard() {
                                 </div>
                               </div>
                               <div className="flex flex-col space-y-2">
+                                {canUploadAsFirstReviewer(document) && (
+                                  <Button 
+                                    onClick={() => handleReviewerUpload(document)}
+                                    variant="default"
+                                  >
+                                    <Upload className="w-4 h-4 mr-2" />
+                                    Upload Document
+                                  </Button>
+                                )}
                                 <Button onClick={() => handleReviewDocument(document)}>
                                   Review Document
                                 </Button>
@@ -427,7 +706,7 @@ export default function StaffDashboard() {
               {/* My Documents */}
               <Card>
                 <CardHeader>
-                  <CardTitle>My Uploaded Documents</CardTitle>
+                  <CardTitle>My Documents</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {documentsLoading ? (
@@ -467,6 +746,82 @@ export default function StaffDashboard() {
         setSelectedDocument(null);
       }}
     />
+
+    {/* Upload Document by Reviewer Modal */}
+    <Dialog open={isReviewerUploadOpen} onOpenChange={setIsReviewerUploadOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Upload Document</DialogTitle>
+        </DialogHeader>
+        
+        {selectedDocumentForUpload && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-3 rounded-lg">
+              <h4 className="font-medium text-gray-900 mb-2">Request Details</h4>
+              <div className="text-sm text-gray-600 space-y-1">
+                <p><strong>Requester:</strong> {selectedDocumentForUpload.user.fullName}</p>
+                <p><strong>Document Type:</strong> {selectedDocumentForUpload.type?.replace('_', ' ') || 'Unknown'}</p>
+                <p><strong>Title:</strong> {selectedDocumentForUpload.title}</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleReviewerUploadSubmit} className="space-y-4">
+              <div>
+                <Label htmlFor="reviewer-document-file">Document File *</Label>
+                <Input
+                  id="reviewer-document-file"
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  className="mt-1"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setReviewerUploadFile(file);
+                    }
+                  }}
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload the processed document file (PDF, DOC, DOCX)
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="reviewer-comments">Comments (Optional)</Label>
+                <Textarea
+                  id="reviewer-comments"
+                  rows={3}
+                  placeholder="Additional notes about the document..."
+                  value={reviewerUploadComments}
+                  onChange={(e) => setReviewerUploadComments(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsReviewerUploadOpen(false);
+                    setSelectedDocumentForUpload(null);
+                    setReviewerUploadFile(null);
+                    setReviewerUploadComments("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  disabled={reviewerUploadMutation.isPending || !reviewerUploadFile}
+                >
+                  {reviewerUploadMutation.isPending ? "Uploading..." : "Upload & Forward"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

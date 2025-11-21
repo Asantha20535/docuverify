@@ -42,6 +42,14 @@ interface DocumentRequest {
   };
   createdAt: string;
   status: string;
+  fileMetadata?: {
+    studentName?: string;
+    registrationNumber?: string;
+    email?: string;
+    level?: string;
+    name?: string;
+    note?: string;
+  } | null;
   workflow?: {
     stepRoles: string[];
     currentStep: number;
@@ -153,6 +161,32 @@ const RequestItem = memo(({
           {new Date(request.createdAt).toLocaleDateString()}
         </div>
       </div>
+
+      {request.fileMetadata && (
+        <div className="mb-3 p-2 bg-gray-50 rounded-md border border-gray-200">
+          <div className="text-xs font-semibold text-gray-700 mb-1">Request Details:</div>
+          <div className="space-y-0.5">
+            {request.fileMetadata.studentName && (
+              <div className="text-xs text-gray-600">Name: {request.fileMetadata.studentName}</div>
+            )}
+            {request.fileMetadata.registrationNumber && (
+              <div className="text-xs text-gray-600">Reg No: {request.fileMetadata.registrationNumber}</div>
+            )}
+            {request.fileMetadata.email && (
+              <div className="text-xs text-gray-600">Email: {request.fileMetadata.email}</div>
+            )}
+            {request.fileMetadata.level && (
+              <div className="text-xs text-gray-600">Level: {request.fileMetadata.level}</div>
+            )}
+            {request.fileMetadata.name && (
+              <div className="text-xs text-gray-600">Name: {request.fileMetadata.name}</div>
+            )}
+            {request.fileMetadata.note && (
+              <div className="text-xs text-gray-600">Note: {request.fileMetadata.note}</div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="mb-3">
         <p className="text-xs text-gray-500 mb-1">Workflow:</p>

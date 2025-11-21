@@ -36,6 +36,8 @@ const documentTypeOptions = [
   { value: "letter_of_recommendation", label: "Letter of Recommendation" },
   { value: "academic_record", label: "Academic Record" },
   { value: "degree_verification", label: "Degree Verification" },
+  { value: "vacation_request", label: "Vacation Request" },
+  { value: "funding_request", label: "Funding Request" },
   { value: "other", label: "Other" },
 ] as const;
 

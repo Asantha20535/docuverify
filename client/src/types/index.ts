@@ -15,7 +15,7 @@ export interface Document {
   id: string;
   title: string;
   description?: string;
-  type: "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "other";
+  type: "transcript_request" | "enrollment_verification" | "grade_report" | "certificate_verification" | "letter_of_recommendation" | "academic_record" | "degree_verification" | "vacation_request" | "funding_request" | "other";
   fileName: string;
   filePath: string;
   fileSize: number;
@@ -27,6 +27,14 @@ export interface Document {
   forwardedFromUserId?: string | null;
   forwardedAt?: string | null;
   forwardedFromUser?: User | null; // Populated by backend when needed
+  fileMetadata?: {
+    studentName?: string;
+    registrationNumber?: string;
+    email?: string;
+    level?: string;
+    name?: string;
+    note?: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

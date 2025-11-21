@@ -190,6 +190,141 @@ export default function DocumentTable({
     return "-";
   };
 
+  // Determine status display for staff view
+  const getStaffStatus = (document: Document): string => {
+    if (!isStaffView) return "";
+    
+    // If forwarded, show "Forwarded"
+    if (document.forwardedToUserId) {
+      return "Forwarded";
+    }
+    
+    // Otherwise show based on document status
+    switch (document.status) {
+      case "approved":
+        return "Approved";
+      case "rejected":
+        return "Rejected";
+      case "in_review":
+        return "In Review";
+      case "pending":
+        return "-";
+      default:
+        return "-";
+    }
+  };
+
+  // Check if document is a direct upload (not part of a workflow)
+  const isDirectUpload = (document: Document): boolean => {
+    if (!isStaffView || !currentUserId) return false;
+    
+    // Direct uploads are documents uploaded by the current user
+    // that are NOT workflow request types
+    const workflowRequestTypes = [
+      "vacation_request",
+      "funding_request",
+      "transcript_request",
+      "enrollment_verification",
+      "grade_report",
+      "certificate_verification",
+      "letter_of_recommendation",
+      "academic_record",
+      "degree_verification"
+    ];
+    
+    return (
+      document.userId === currentUserId &&
+      !workflowRequestTypes.includes(document.type) &&
+      !document.forwardedFromUserId
+    );
+  };
+
+  // Determine which action buttons to show for staff view
+  const getStaffActionButtons = (document: Document) => {
+    if (!isStaffView) return null;
+
+    // Special case: Direct uploads show all buttons regardless of status
+    if (isDirectUpload(document)) {
+      return {
+        showView: true,
+        showDownload: true,
+        showDelete: true,
+      };
+    }
+
+    // Workflow documents: buttons based on status
+    switch (document.status) {
+      case "in_review":
+        return {
+          showView: false,
+          showDownload: false,
+          showDelete: false,
+        };
+      case "approved":
+        return {
+          showView: true,
+          showDownload: true,
+          showDelete: true,
+        };
+      case "rejected":
+        return {
+          showView: false,
+          showDownload: false,
+          showDelete: true,
+        };
+      default:
+        return {
+          showView: false,
+          showDownload: false,
+          showDelete: false,
+        };
+    }
+  };
+
+  // Determine if Forward button should be shown
+  const shouldShowForwardButton = (document: Document): boolean => {
+    if (!isStaffView) return false;
+
+    // Special case: Direct uploads always show Forward button
+    if (isDirectUpload(document)) {
+      return true;
+    }
+
+    // Workflow documents: only show Forward button when status is approved
+    return document.status === "approved";
+  };
+
+  // Format and display request details from metadata
+  const getRequestDetails = (document: Document): string[] => {
+    const details: string[] = [];
+    
+    if (!document.fileMetadata) return details;
+
+    // Student request details
+    if (document.fileMetadata.studentName) {
+      details.push(`Name: ${document.fileMetadata.studentName}`);
+    }
+    if (document.fileMetadata.registrationNumber) {
+      details.push(`Reg No: ${document.fileMetadata.registrationNumber}`);
+    }
+    if (document.fileMetadata.email) {
+      details.push(`Email: ${document.fileMetadata.email}`);
+    }
+    if (document.fileMetadata.level) {
+      details.push(`Level: ${document.fileMetadata.level}`);
+    }
+
+    // Staff request details
+    if (document.fileMetadata.name) {
+      details.push(`Name: ${document.fileMetadata.name}`);
+    }
+    if (document.fileMetadata.note) {
+      details.push(`Note: ${document.fileMetadata.note}`);
+    }
+
+    return details;
+  };
+
   return (
     <>
     <div className="overflow-x-auto">
@@ -200,6 +335,7 @@ export default function DocumentTable({
             {isStaffView ? (
               <>
                 <TableHead>From</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Uploaded</TableHead>
                 {!hideActionsColumn && <TableHead>Actions</TableHead>}
                 <TableHead>Forward</TableHead>
@@ -220,13 +356,22 @@ export default function DocumentTable({
               <TableCell>
                 <div className="flex items-center">
                   <FileText className="h-4 w-4 text-red-500 mr-3" />
-                  <div>
+                  <div className="flex-1">
                     <div className="text-sm font-medium text-gray-900" data-testid="text-document-title">
                       {document.title}
                     </div>
                     <div className="text-sm text-gray-500 font-mono" data-testid="text-document-hash">
                       SHA-256: {document.hash.substring(0, 12)}...
                     </div>
+                    {getRequestDetails(document).length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {getRequestDetails(document).map((detail, index) => (
+                          <div key={index} className="text-xs text-gray-600">
+                            {detail}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </TableCell>
@@ -235,37 +380,71 @@ export default function DocumentTable({
                   <TableCell className="text-sm text-gray-900">
                     {getFromValue(document)}
                   </TableCell>
+                  <TableCell>
+                    {(() => {
+                      const status = getStaffStatus(document);
+                      if (status === "-") {
+                        return <span className="text-sm text-gray-500">-</span>;
+                      }
+                      const statusColor = status === "Approved" 
+                        ? "bg-green-100 text-green-800"
+                        : status === "Rejected"
+                        ? "bg-red-100 text-red-800"
+                        : status === "In Review"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : status === "Forwarded"
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-gray-100 text-gray-800";
+                      return (
+                        <Badge className={statusColor} data-testid="badge-status">
+                          {status}
+                        </Badge>
+                      );
+                    })()}
+                  </TableCell>
                   <TableCell className="text-sm text-gray-500">
                     {new Date(document.createdAt).toLocaleDateString()}
                   </TableCell>
-                  {!hideActionsColumn && (
-                    <TableCell>
-                      {(!onlyApprovedActions || document.status === "approved" || (showDeleteButton && document.status === "rejected")) ? (
+                  {!hideActionsColumn && (() => {
+                    const actionButtons = getStaffActionButtons(document);
+                    if (!actionButtons) return null;
+
+                    // If no buttons should be shown, display message for in_review status
+                    if (!actionButtons.showView && !actionButtons.showDownload && !actionButtons.showDelete) {
+                      return (
+                        <TableCell>
+                          <span className="text-xs text-gray-400">No actions available</span>
+                        </TableCell>
+                      );
+                    }
+
+                    return (
+                      <TableCell>
                         <div className="flex items-center space-x-2">
-                          {!(showDeleteButton && document.status === "rejected") && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setPreviewDoc(document)}
-                                data-testid="button-view"
-                                title="View"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <a
-                                href={`/api/documents/${document.id}/content?download=1`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label="Download"
-                              >
-                                <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              </a>
-                            </>
+                          {actionButtons.showView && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPreviewDoc(document)}
+                              data-testid="button-view"
+                              title="View"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                           )}
-                          {showDeleteButton && (
+                          {actionButtons.showDownload && (
+                            <a
+                              href={`/api/documents/${document.id}/content?download=1`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label="Download"
+                            >
+                              <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </a>
+                          )}
+                          {actionButtons.showDelete && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -278,22 +457,24 @@ export default function DocumentTable({
                             </Button>
                           )}
                         </div>
-                      ) : (
-                        <span className="text-xs text-gray-400">Awaiting approval</span>
-                      )}
-                    </TableCell>
-                  )}
+                      </TableCell>
+                    );
+                  })()}
                   <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleForward(document)}
-                      data-testid="button-forward"
-                      title="Forward"
-                    >
-                      <Forward className="h-4 w-4 mr-1" />
-                      Forward
-                    </Button>
+                    {shouldShowForwardButton(document) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleForward(document)}
+                        data-testid="button-forward"
+                        title="Forward"
+                      >
+                        <Forward className="h-4 w-4 mr-1" />
+                        Forward
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
                   </TableCell>
                 </>
               ) : (

@@ -227,6 +227,10 @@ export class DatabaseStorage implements IStorage {
         hash: documents.hash,
         status: documents.status,
         userId: documents.userId,
+        forwardedToUserId: documents.forwardedToUserId,
+        forwardedFromUserId: documents.forwardedFromUserId,
+        forwardedAt: documents.forwardedAt,
+        fileMetadata: documents.fileMetadata,
         createdAt: documents.createdAt,
         updatedAt: documents.updatedAt,
         user: {
@@ -259,8 +263,11 @@ export class DatabaseStorage implements IStorage {
         and(
           eq(documents.status, "in_review"),
           eq(workflows.isCompleted, false),
-          // Exclude documents uploaded by staff (academic_staff, department_head, dean, etc.)
-          sql`${users.role} NOT IN ('academic_staff', 'department_head', 'dean', 'vice_chancellor', 'assistant_registrar')`
+          // Exclude documents uploaded by staff, EXCEPT vacation_request and funding_request which should follow workflow
+          sql`(
+            ${users.role} NOT IN ('academic_staff', 'department_head', 'dean', 'vice_chancellor', 'assistant_registrar')
+            OR ${documents.type} IN ('vacation_request', 'funding_request')
+          )`
         )
       )
       .orderBy(desc(documents.createdAt));
@@ -452,13 +459,14 @@ export class DatabaseStorage implements IStorage {
 
   // Course Unit operations
   async getDocumentRequestsForCourseUnit(): Promise<any[]> {
-    const requests = await db
+    const allRequests = await db
       .select({
         id: documents.id,
         title: documents.title,
         type: documents.type,
         createdAt: documents.createdAt,
         status: documents.status,
+        fileMetadata: documents.fileMetadata,
         student: {
           id: users.id,
           fullName: users.fullName,
@@ -472,24 +480,36 @@ export class DatabaseStorage implements IStorage {
       })
       .from(documents)
       .innerJoin(users, eq(documents.userId, users.id))
-      .leftJoin(workflows, eq(documents.id, workflows.documentId))
+      .innerJoin(workflows, eq(documents.id, workflows.documentId))
       .where(and(
         sql`${documents.status} IN ('pending', 'in_review')`,
-        sql`${documents.type} != 'transcript_request'`
+        sql`${documents.type} != 'transcript_request'`,
+        eq(workflows.isCompleted, false)
       ))
       .orderBy(desc(documents.createdAt));
+    
+    // Filter to show documents where course_unit is in the workflow path
+    // Documents remain visible until the entire workflow is completed
+    const requests = allRequests.filter((req: any) => {
+      if (!req.workflow || !req.workflow.stepRoles) {
+        return false;
+      }
+      // Check if course_unit appears anywhere in the workflow path
+      return req.workflow.stepRoles.includes("course_unit");
+    });
     
     return requests;
   }
 
   async getTranscriptRequestsForCourseUnit(): Promise<any[]> {
-    const requests = await db
+    const allRequests = await db
       .select({
         id: documents.id,
         title: documents.title,
         type: documents.type,
         createdAt: documents.createdAt,
         status: documents.status,
+        fileMetadata: documents.fileMetadata,
         student: {
           id: users.id,
           fullName: users.fullName,
@@ -503,12 +523,23 @@ export class DatabaseStorage implements IStorage {
       })
       .from(documents)
       .innerJoin(users, eq(documents.userId, users.id))
-      .leftJoin(workflows, eq(documents.id, workflows.documentId))
+      .innerJoin(workflows, eq(documents.id, workflows.documentId))
       .where(and(
         eq(documents.type, "transcript_request"),
-        sql`${documents.status} IN ('pending', 'in_review')`
+        sql`${documents.status} IN ('pending', 'in_review')`,
+        eq(workflows.isCompleted, false)
       ))
       .orderBy(desc(documents.createdAt));
+    
+    // Filter to show documents where course_unit is in the workflow path
+    // Documents remain visible until the entire workflow is completed
+    const requests = allRequests.filter((req: any) => {
+      if (!req.workflow || !req.workflow.stepRoles) {
+        return false;
+      }
+      // Check if course_unit appears anywhere in the workflow path
+      return req.workflow.stepRoles.includes("course_unit");
+    });
     
     return requests;
   }

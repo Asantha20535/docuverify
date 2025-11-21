@@ -98,6 +98,37 @@ export default function WorkflowDashboard() {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
+  // Format and display request details from metadata
+  const getRequestDetails = (document: DocumentWithDetails): string[] => {
+    const details: string[] = [];
+    
+    if (!document.fileMetadata) return details;
+
+    // Student request details
+    if (document.fileMetadata.studentName) {
+      details.push(`Name: ${document.fileMetadata.studentName}`);
+    }
+    if (document.fileMetadata.registrationNumber) {
+      details.push(`Reg No: ${document.fileMetadata.registrationNumber}`);
+    }
+    if (document.fileMetadata.email) {
+      details.push(`Email: ${document.fileMetadata.email}`);
+    }
+    if (document.fileMetadata.level) {
+      details.push(`Level: ${document.fileMetadata.level}`);
+    }
+
+    // Staff request details
+    if (document.fileMetadata.name) {
+      details.push(`Name: ${document.fileMetadata.name}`);
+    }
+    if (document.fileMetadata.note) {
+      details.push(`Note: ${document.fileMetadata.note}`);
+    }
+
+    return details;
+  };
+
   const getWorkflowProgress = (document: DocumentWithDetails) => {
     if (!document.workflow) return { completed: 0, total: 0, current: "" };
     
@@ -236,6 +267,19 @@ export default function WorkflowDashboard() {
                                   <span className="font-mono">{document.hash.substring(0, 8)}...</span>
                                 </span>
                               </div>
+
+                              {getRequestDetails(document).length > 0 && (
+                                <div className="mt-3 p-3 bg-gray-50 rounded-md border border-gray-200">
+                                  <div className="text-xs font-semibold text-gray-700 mb-2">Request Details:</div>
+                                  <div className="space-y-1">
+                                    {getRequestDetails(document).map((detail, index) => (
+                                      <div key={index} className="text-xs text-gray-600">
+                                        {detail}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                               
                               {/* Workflow Progress */}
                               {document.workflow && (

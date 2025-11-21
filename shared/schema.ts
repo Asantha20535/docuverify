@@ -22,6 +22,8 @@ export const documentTypeEnum = pgEnum("document_type", [
   "letter_of_recommendation",
   "academic_record",
   "degree_verification",
+  "vacation_request",
+  "funding_request",
   "other"
 ]);
 
