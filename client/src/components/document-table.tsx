@@ -1,12 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FileText, Download, Eye, Trash2 } from "lucide-react";
-import type { Document } from "@/types";
+import { FileText, Download, Eye, Trash2, Forward } from "lucide-react";
+import type { Document, User } from "@/types";
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 interface DocumentTableProps {
   documents: Document[];
@@ -14,6 +16,8 @@ interface DocumentTableProps {
   onlyApprovedActions?: boolean;
   showDeleteButton?: boolean;
   hideActionsColumn?: boolean;
+  isStaffView?: boolean; // For staff dashboard with forwarding features
+  currentUserId?: string; // Current logged-in user ID for staff view
 }
 
 export default function DocumentTable({ 
@@ -21,12 +25,22 @@ export default function DocumentTable({
   isLoading, 
   onlyApprovedActions = false,
   showDeleteButton = false,
-  hideActionsColumn = false
+  hideActionsColumn = false,
+  isStaffView = false,
+  currentUserId
 }: DocumentTableProps) {
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
   const [deleteDoc, setDeleteDoc] = useState<Document | null>(null);
+  const [forwardDoc, setForwardDoc] = useState<Document | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Fetch users for forward modal (only for staff view)
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+    enabled: isStaffView && !!forwardDoc,
+  });
 
   const deleteMutation = useMutation({
     mutationFn: async (documentId: string) => {
@@ -72,6 +86,55 @@ export default function DocumentTable({
     }
   };
 
+  const forwardMutation = useMutation({
+    mutationFn: async ({ documentId, userId }: { documentId: string; userId: string }) => {
+      const response = await fetch(`/api/documents/${documentId}/forward`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ userId }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Forward failed");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Document forwarded successfully.",
+        description: "The document has been forwarded to the selected user.",
+      });
+      
+      // Refresh documents list
+      queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      setForwardDoc(null);
+      setSelectedUserId("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Forward Failed",
+        description: error.message || "Failed to forward document",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleForward = (document: Document) => {
+    setForwardDoc(document);
+    setSelectedUserId("");
+  };
+
+  const confirmForward = () => {
+    if (forwardDoc && selectedUserId) {
+      forwardMutation.mutate({ documentId: forwardDoc.id, userId: selectedUserId });
+    }
+  };
+
   if (isLoading) {
     return <div className="text-center py-8">Loading documents...</div>;
   }
@@ -113,6 +176,20 @@ export default function DocumentTable({
     return type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
+  // Determine "From" value for staff view
+  const getFromValue = (document: Document): string => {
+    if (!isStaffView || !currentUserId) return "-";
+    // If document was uploaded by current user, show "-"
+    if (document.userId === currentUserId && !document.forwardedFromUserId) {
+      return "-";
+    }
+    // If document was forwarded, show the name of the user who forwarded it
+    if (document.forwardedFromUser) {
+      return document.forwardedFromUser.fullName;
+    }
+    return "-";
+  };
+
   return (
     <>
     <div className="overflow-x-auto">
@@ -120,10 +197,21 @@ export default function DocumentTable({
         <TableHeader>
           <TableRow>
             <TableHead>Document</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Uploaded</TableHead>
-            {!hideActionsColumn && <TableHead>Actions</TableHead>}
+            {isStaffView ? (
+              <>
+                <TableHead>From</TableHead>
+                <TableHead>Uploaded</TableHead>
+                {!hideActionsColumn && <TableHead>Actions</TableHead>}
+                <TableHead>Forward</TableHead>
+              </>
+            ) : (
+              <>
+                <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Uploaded</TableHead>
+                {!hideActionsColumn && <TableHead>Actions</TableHead>}
+              </>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -142,61 +230,131 @@ export default function DocumentTable({
                   </div>
                 </div>
               </TableCell>
-              <TableCell className="text-sm text-gray-900">
-                {formatDocumentType(document.type)}
-              </TableCell>
-              <TableCell>
-                <Badge className={getStatusColor(document.status)} data-testid="badge-status">
-                  {formatStatus(document.status)}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-sm text-gray-500">
-                {new Date(document.createdAt).toLocaleDateString()}
-              </TableCell>
-              {!hideActionsColumn && (
-                <TableCell>
-                  {(!onlyApprovedActions || document.status === "approved" || (showDeleteButton && document.status === "rejected")) ? (
-                    <div className="flex items-center space-x-2">
-                      {!(showDeleteButton && document.status === "rejected") && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setPreviewDoc(document)}
-                            data-testid="button-view"
-                            title="View"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <a
-                            href={`/api/documents/${document.id}/content?download=1`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label="Download"
-                          >
-                            <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
-                              <Download className="h-4 w-4" />
+              {isStaffView ? (
+                <>
+                  <TableCell className="text-sm text-gray-900">
+                    {getFromValue(document)}
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-500">
+                    {new Date(document.createdAt).toLocaleDateString()}
+                  </TableCell>
+                  {!hideActionsColumn && (
+                    <TableCell>
+                      {(!onlyApprovedActions || document.status === "approved" || (showDeleteButton && document.status === "rejected")) ? (
+                        <div className="flex items-center space-x-2">
+                          {!(showDeleteButton && document.status === "rejected") && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPreviewDoc(document)}
+                                data-testid="button-view"
+                                title="View"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <a
+                                href={`/api/documents/${document.id}/content?download=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label="Download"
+                              >
+                                <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </a>
+                            </>
+                          )}
+                          {showDeleteButton && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(document)}
+                              data-testid="button-delete"
+                              title="Delete"
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                          </a>
-                        </>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Awaiting approval</span>
                       )}
-                      {showDeleteButton && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(document)}
-                          data-testid="button-delete"
-                          title="Delete"
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-gray-400">Awaiting approval</span>
+                    </TableCell>
                   )}
-                </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleForward(document)}
+                      data-testid="button-forward"
+                      title="Forward"
+                    >
+                      <Forward className="h-4 w-4 mr-1" />
+                      Forward
+                    </Button>
+                  </TableCell>
+                </>
+              ) : (
+                <>
+                  <TableCell className="text-sm text-gray-900">
+                    {formatDocumentType(document.type)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={getStatusColor(document.status)} data-testid="badge-status">
+                      {formatStatus(document.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-gray-500">
+                    {new Date(document.createdAt).toLocaleDateString()}
+                  </TableCell>
+                  {!hideActionsColumn && (
+                    <TableCell>
+                      {(!onlyApprovedActions || document.status === "approved" || (showDeleteButton && document.status === "rejected")) ? (
+                        <div className="flex items-center space-x-2">
+                          {!(showDeleteButton && document.status === "rejected") && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPreviewDoc(document)}
+                                data-testid="button-view"
+                                title="View"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <a
+                                href={`/api/documents/${document.id}/content?download=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label="Download"
+                              >
+                                <Button variant="ghost" size="sm" data-testid="button-download" title="Download">
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </a>
+                            </>
+                          )}
+                          {showDeleteButton && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(document)}
+                              data-testid="button-delete"
+                              title="Delete"
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Awaiting approval</span>
+                      )}
+                    </TableCell>
+                  )}
+                </>
               )}
             </TableRow>
           ))}
@@ -237,6 +395,52 @@ export default function DocumentTable({
         <DialogFooter>
           <Button variant="outline" onClick={() => setDeleteDoc(null)}>Cancel</Button>
           <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Forward document dialog */}
+    <Dialog open={!!forwardDoc} onOpenChange={() => {
+      setForwardDoc(null);
+      setSelectedUserId("");
+    }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Forward Document</DialogTitle>
+          <DialogDescription>
+            Select a user to forward this document to.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div>
+            <Label htmlFor="user-select">Select User</Label>
+            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+              <SelectTrigger id="user-select" className="mt-2">
+                <SelectValue placeholder="Choose a user..." />
+              </SelectTrigger>
+              <SelectContent>
+                {users.map((user) => (
+                  <SelectItem key={user.id} value={user.id}>
+                    {user.fullName} ({user.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => {
+            setForwardDoc(null);
+            setSelectedUserId("");
+          }}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmForward} 
+            disabled={!selectedUserId || forwardMutation.isPending}
+          >
+            {forwardMutation.isPending ? "Forwarding..." : "Forward"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

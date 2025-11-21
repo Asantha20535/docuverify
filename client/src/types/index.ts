@@ -23,6 +23,10 @@ export interface Document {
   hash: string;
   status: "pending" | "in_review" | "approved" | "rejected" | "completed";
   userId: string;
+  forwardedToUserId?: string | null;
+  forwardedFromUserId?: string | null;
+  forwardedAt?: string | null;
+  forwardedFromUser?: User | null; // Populated by backend when needed
   createdAt: string;
   updatedAt: string;
 }

@@ -5,7 +5,7 @@ import {
   type VerificationLog, type InsertVerificationLog, type DocumentTemplate, type InsertDocumentTemplate
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations
@@ -22,6 +22,7 @@ export interface IStorage {
   getDocument(id: string): Promise<Document | undefined>;
   getDocumentByHash(hash: string): Promise<Document | undefined>;
   getUserDocuments(userId: string): Promise<Document[]>;
+  getStaffDocuments(userId: string): Promise<(Document & { forwardedFromUser?: User | null })[]>;
   createDocument(document: InsertDocument): Promise<Document>;
   updateDocument(id: string, updates: Partial<InsertDocument>): Promise<Document>;
   deleteDocument(id: string, userId: string): Promise<void>;
@@ -125,6 +126,29 @@ export class DatabaseStorage implements IStorage {
       .from(documents)
       .where(eq(documents.userId, userId))
       .orderBy(desc(documents.createdAt));
+  }
+
+  async getStaffDocuments(userId: string): Promise<(Document & { forwardedFromUser?: User | null })[]> {
+    // Get documents uploaded by user OR forwarded to user
+    const docs = await db
+      .select({
+        document: documents,
+        forwardedFromUser: users,
+      })
+      .from(documents)
+      .leftJoin(users, eq(documents.forwardedFromUserId, users.id))
+      .where(
+        or(
+          eq(documents.userId, userId),
+          eq(documents.forwardedToUserId, userId)
+        )
+      )
+      .orderBy(desc(documents.createdAt));
+
+    return docs.map(({ document, forwardedFromUser }) => ({
+      ...document,
+      forwardedFromUser: forwardedFromUser || null,
+    }));
   }
 
   async createDocument(insertDocument: InsertDocument): Promise<Document> {

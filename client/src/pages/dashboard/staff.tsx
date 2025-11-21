@@ -445,6 +445,8 @@ export default function StaffDashboard() {
                           documents={filteredDocuments.length > 0 ? filteredDocuments : documents} 
                           isLoading={documentsLoading} 
                           showDeleteButton={true}
+                          isStaffView={true}
+                          currentUserId={user.id}
                         />
                       </div>
                     </>

@@ -72,6 +72,10 @@ export const documents = pgTable("documents", {
   // Optional raw file content stored in DB as base64-encoded text (compat with current Drizzle version)
   fileContent: text("file_content"),
   fileMetadata: jsonb("file_metadata"),
+  // Forwarding fields
+  forwardedToUserId: varchar("forwarded_to_user_id").references(() => users.id),
+  forwardedFromUserId: varchar("forwarded_from_user_id").references(() => users.id),
+  forwardedAt: timestamp("forwarded_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

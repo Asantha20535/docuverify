@@ -499,8 +499,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/documents", requireAuth, async (req, res) => {
     try {
-      const documents = await storage.getUserDocuments(req.session.userId!);
-      res.json(documents);
+      const userRole = req.session.userRole!;
+      const staffRoles = ["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"];
+      
+      // For staff users, return documents they uploaded OR documents forwarded to them
+      if (staffRoles.includes(userRole)) {
+        const documents = await storage.getStaffDocuments(req.session.userId!);
+        res.json(documents);
+      } else {
+        // For other users (students), return only their uploaded documents
+        const documents = await storage.getUserDocuments(req.session.userId!);
+        res.json(documents);
+      }
     } catch (error) {
       console.error("Get documents error:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -566,6 +576,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Document deleted successfully" });
     } catch (error) {
       console.error("Delete document error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Forward document endpoint
+  app.post("/api/documents/:id/forward", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { userId: forwardedToUserId } = req.body;
+
+      if (!forwardedToUserId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+
+      const document = await storage.getDocument(id);
+      if (!document) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+
+      // Check if user owns the document or it was forwarded to them
+      if (document.userId !== req.session.userId && document.forwardedToUserId !== req.session.userId) {
+        return res.status(403).json({ message: "You can only forward documents you own or that were forwarded to you" });
+      }
+
+      // Verify the target user exists
+      const targetUser = await storage.getUser(forwardedToUserId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "Target user not found" });
+      }
+
+      // Update document with forwarding information
+      await storage.updateDocument(id, {
+        forwardedToUserId,
+        forwardedFromUserId: req.session.userId!,
+        forwardedAt: new Date(),
+      });
+
+      res.json({ message: "Document forwarded successfully" });
+    } catch (error) {
+      console.error("Forward document error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get all users endpoint (for forward modal)
+  app.get("/api/users", requireAuth, requireRole(["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"]), async (req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      // Allowed roles for forwarding (exclude student, course_unit, and admin)
+      const allowedRoles = ["academic_staff", "department_head", "dean", "vice_chancellor", "assistant_registrar"];
+      // Return only active users with allowed roles, excluding the current user
+      const users = allUsers
+        .filter(user => user.isActive && user.id !== req.session.userId && allowedRoles.includes(user.role))
+        .map(user => ({
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+        }));
+      res.json(users);
+    } catch (error) {
+      console.error("Get users error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
