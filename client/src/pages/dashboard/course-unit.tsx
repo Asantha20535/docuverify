@@ -207,14 +207,29 @@ const RequestItem = memo(({
             Discard
           </Button>
         )}
-        <Button
-          size="sm"
-          onClick={() => onUploadClick(request)}
-          disabled={!["pending", "in_review"].includes(request.status)}
-        >
-          <Upload className="w-3 h-3 mr-1" />
-          Upload & Forward
-        </Button>
+        {/* Hide button if course unit has already uploaded and forwarded the transcript */}
+        {(() => {
+          // Check if course unit has already processed this request
+          // If workflow exists and currentStep has moved past the course_unit step, it's been processed
+          if (request.workflow && request.workflow.stepRoles) {
+            const courseUnitStepIndex = request.workflow.stepRoles.indexOf("course_unit");
+            // If course_unit is in the workflow and currentStep has passed it, hide the button
+            if (courseUnitStepIndex >= 0 && request.workflow.currentStep > courseUnitStepIndex) {
+              return null; // Don't show the button - already processed
+            }
+          }
+          
+          return (
+            <Button
+              size="sm"
+              onClick={() => onUploadClick(request)}
+              disabled={!["pending", "in_review"].includes(request.status)}
+            >
+              <Upload className="w-3 h-3 mr-1" />
+              Upload & Forward
+            </Button>
+          );
+        })()}
       </div>
     </div>
   );
