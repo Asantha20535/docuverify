@@ -10,6 +10,7 @@ import WorkflowManagement from "@/components/workflow-management";
 import DocumentSearch from "@/components/document-search";
 import DocumentTable from "@/components/document-table";
 import ProfileSettings from "@/components/profile-settings";
+import AuditLog from "@/components/audit-log";
 import type { User, Document } from "@/types";
 import { useLocation } from "wouter";
 import { useState } from "react";
@@ -195,16 +196,7 @@ export default function AdminDashboard() {
           </TabsContent>
           
           <TabsContent value="audit">
-            <Card>
-              <CardHeader>
-                <CardTitle>Audit Log</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-gray-500">
-                  Audit log functionality would be implemented here
-                </div>
-              </CardContent>
-            </Card>
+            <AuditLog />
           </TabsContent>
         </Tabs>
       </div>

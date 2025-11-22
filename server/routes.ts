@@ -1007,6 +1007,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/admin/audit-logs", requireAuth, requireRole(["admin"]), async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      const logs = await storage.getAuditLogs(limit);
+      res.json(logs);
+    } catch (error) {
+      console.error("Get audit logs error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Admin user management routes
   app.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
     try {

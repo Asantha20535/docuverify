@@ -61,6 +61,9 @@ export interface IStorage {
   getTranscriptRequest(id: string): Promise<any | undefined>;
   getDocumentRequest(id: string): Promise<any | undefined>;
   deleteDocumentRequest(id: string, userId: string): Promise<void>;
+  
+  // Audit log operations
+  getAuditLogs(limit?: number): Promise<any[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -734,6 +737,94 @@ export class DatabaseStorage implements IStorage {
       console.warn('Could not delete physical file:', fileError);
       // Don't fail the operation if file deletion fails
     }
+  }
+
+  async getAuditLogs(limit: number = 100): Promise<any[]> {
+    // Get workflow actions with user and document info
+    const workflowActionLogs = await db
+      .select({
+        id: workflowActions.id,
+        type: sql<string>`'workflow_action'`.as('type'),
+        action: workflowActions.action,
+        comment: workflowActions.comment,
+        step: workflowActions.step,
+        createdAt: workflowActions.createdAt,
+        user: {
+          id: users.id,
+          fullName: users.fullName,
+          role: users.role,
+          username: users.username,
+        },
+        document: {
+          id: documents.id,
+          title: documents.title,
+          type: documents.type,
+          hash: documents.hash,
+        },
+        workflow: {
+          id: workflows.id,
+        },
+      })
+      .from(workflowActions)
+      .innerJoin(users, eq(workflowActions.userId, users.id))
+      .innerJoin(workflows, eq(workflowActions.workflowId, workflows.id))
+      .innerJoin(documents, eq(workflows.documentId, documents.id))
+      .orderBy(desc(workflowActions.createdAt))
+      .limit(limit);
+
+    // Get verification logs
+    const verificationLogsData = await db
+      .select({
+        id: verificationLogs.id,
+        type: sql<string>`'verification'`.as('type'),
+        documentHash: verificationLogs.documentHash,
+        ipAddress: verificationLogs.ipAddress,
+        userAgent: verificationLogs.userAgent,
+        isVerified: verificationLogs.isVerified,
+        createdAt: verificationLogs.createdAt,
+      })
+      .from(verificationLogs)
+      .orderBy(desc(verificationLogs.createdAt))
+      .limit(limit);
+
+    // Get document creation/updates (simplified - just creation for now)
+    const documentLogs = await db
+      .select({
+        id: documents.id,
+        type: sql<string>`'document_created'`.as('type'),
+        title: documents.title,
+        documentType: documents.type,
+        status: documents.status,
+        createdAt: documents.createdAt,
+        user: {
+          id: users.id,
+          fullName: users.fullName,
+          role: users.role,
+          username: users.username,
+        },
+      })
+      .from(documents)
+      .innerJoin(users, eq(documents.userId, users.id))
+      .orderBy(desc(documents.createdAt))
+      .limit(limit);
+
+    // Combine and sort all logs by timestamp
+    const allLogs = [
+      ...workflowActionLogs.map(log => ({
+        ...log,
+        timestamp: log.createdAt,
+      })),
+      ...verificationLogsData.map(log => ({
+        ...log,
+        timestamp: log.createdAt,
+      })),
+      ...documentLogs.map(log => ({
+        ...log,
+        timestamp: log.createdAt,
+      })),
+    ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return allLogs.slice(0, limit);
   }
 }
 
