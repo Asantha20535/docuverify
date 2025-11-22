@@ -161,10 +161,6 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
     reviewMutation.mutate(buildReviewPayload("approve"));
   };
 
-  const handleForward = () => {
-    reviewMutation.mutate(buildReviewPayload("forward"));
-  };
-
   const handleReject = () => {
     setRejectOpen(true);
   };
@@ -379,9 +375,6 @@ export default function ReviewModal({ document, isOpen, onClose }: ReviewModalPr
             <div className="flex flex-wrap gap-2 justify-end">
               <Button type="button" variant="outline" onClick={onClose} data-testid="button-cancel">
                 Cancel
-              </Button>
-              <Button type="button" onClick={handleForward} variant="secondary" disabled={!canReview || reviewMutation.isPending} data-testid="button-forward">
-                {reviewMutation.isPending ? "Processing..." : "Forward"}
               </Button>
               <Button type="button" onClick={handleApprove} disabled={!canReview || reviewMutation.isPending} data-testid="button-approve">
                 {reviewMutation.isPending ? "Processing..." : "Approve & Forward"}
