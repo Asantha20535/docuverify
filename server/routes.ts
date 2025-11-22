@@ -15,6 +15,7 @@ import type { Document as DbDocument, DocumentTemplate } from "@shared/schema";
 import { z } from "zod";
 import { applySignatureToPdf, parseSignatureDataUrl } from "./signature-service";
 import type { NormalizedSignaturePlacement } from "./signature-service";
+import { decryptSignature } from "./signature-crypto";
 
 declare module "express-session" {
   interface SessionData {
@@ -73,11 +74,16 @@ const attemptLoadSignatureFile = async (storedValue: string): Promise<string | n
 
 const ensureSignatureDataUrl = async (userId: string, signatureValue?: string | null): Promise<string | null> => {
   if (!signatureValue) return null;
-  if (signatureValue.startsWith("data:image")) {
-    return signatureValue;
+  
+  // Decrypt if encrypted
+  const decrypted = decryptSignature(signatureValue);
+  if (!decrypted) return null;
+  
+  if (decrypted.startsWith("data:image")) {
+    return decrypted;
   }
 
-  const normalized = await attemptLoadSignatureFile(signatureValue);
+  const normalized = await attemptLoadSignatureFile(decrypted);
   if (normalized) {
     await storage.updateUser(userId, { signature: normalized });
     return normalized;

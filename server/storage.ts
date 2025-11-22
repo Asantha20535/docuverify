@@ -6,6 +6,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, desc, asc, sql } from "drizzle-orm";
+import { encryptSignature, decryptSignature } from "./signature-crypto";
 
 export interface IStorage {
   // User operations
@@ -65,16 +66,25 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    if (user && user.signature) {
+      user.signature = decryptSignature(user.signature);
+    }
     return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.username, username));
+    if (user && user.signature) {
+      user.signature = decryptSignature(user.signature);
+    }
     return user || undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
+    if (user && user.signature) {
+      user.signature = decryptSignature(user.signature);
+    }
     return user || undefined;
   }
 
@@ -87,11 +97,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUser(id: string, updates: Partial<InsertUser>): Promise<User> {
+    // Encrypt signature before saving
+    const encryptedUpdates = { ...updates };
+    if (encryptedUpdates.signature !== undefined) {
+      encryptedUpdates.signature = encryptSignature(encryptedUpdates.signature);
+    }
+    
     const [user] = await db
       .update(users)
-      .set(updates)
+      .set(encryptedUpdates)
       .where(eq(users.id, id))
       .returning();
+    
+    // Decrypt signature when returning
+    if (user && user.signature) {
+      user.signature = decryptSignature(user.signature);
+    }
     return user;
   }
 
@@ -100,7 +121,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users).orderBy(asc(users.fullName));
+    const allUsers = await db.select().from(users).orderBy(asc(users.fullName));
+    // Decrypt signatures for all users
+    return allUsers.map(user => {
+      if (user.signature) {
+        user.signature = decryptSignature(user.signature);
+      }
+      return user;
+    });
   }
 
   async updateLastLogin(id: string): Promise<void> {
@@ -145,10 +173,20 @@ export class DatabaseStorage implements IStorage {
       )
       .orderBy(desc(documents.createdAt));
 
-    return docs.map(({ document, forwardedFromUser }) => ({
-      ...document,
-      forwardedFromUser: forwardedFromUser || null,
-    }));
+    return docs.map(({ document, forwardedFromUser }) => {
+      // Decrypt signature if forwardedFromUser exists
+      let decryptedForwardedFromUser = forwardedFromUser;
+      if (decryptedForwardedFromUser && decryptedForwardedFromUser.signature) {
+        decryptedForwardedFromUser = {
+          ...decryptedForwardedFromUser,
+          signature: decryptSignature(decryptedForwardedFromUser.signature),
+        };
+      }
+      return {
+        ...document,
+        forwardedFromUser: decryptedForwardedFromUser || null,
+      };
+    });
   }
 
   async createDocument(insertDocument: InsertDocument): Promise<Document> {
@@ -272,7 +310,13 @@ export class DatabaseStorage implements IStorage {
       )
       .orderBy(desc(documents.createdAt));
 
-    return rows as any;
+    // Decrypt user signatures
+    return rows.map((row: any) => {
+      if (row.user && row.user.signature) {
+        row.user.signature = decryptSignature(row.user.signature);
+      }
+      return row;
+    }) as any;
   }
 
   async getWorkflow(id: string): Promise<Workflow | undefined> {
@@ -323,10 +367,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createWorkflowAction(insertAction: InsertWorkflowAction): Promise<WorkflowAction> {
+    // Encrypt signature before saving
+    const encryptedAction = { ...insertAction };
+    if (encryptedAction.signature !== undefined) {
+      encryptedAction.signature = encryptSignature(encryptedAction.signature);
+    }
+    
     const [action] = await db
       .insert(workflowActions)
-      .values(insertAction)
+      .values(encryptedAction)
       .returning();
+    
+    // Decrypt signature when returning
+    if (action && action.signature) {
+      action.signature = decryptSignature(action.signature);
+    }
     return action;
   }
 
@@ -361,10 +416,21 @@ export class DatabaseStorage implements IStorage {
       .where(eq(workflowActions.workflowId, workflowId))
       .orderBy(asc(workflowActions.createdAt));
 
-    return rows.map(({ action, user }) => ({
-      ...action,
-      user: user as User,
-    })) as (WorkflowAction & { user: User })[];
+    return rows.map(({ action, user }) => {
+      // Decrypt signatures
+      const decryptedAction = { ...action };
+      if (decryptedAction.signature) {
+        decryptedAction.signature = decryptSignature(decryptedAction.signature);
+      }
+      const decryptedUser = { ...user };
+      if (decryptedUser.signature) {
+        decryptedUser.signature = decryptSignature(decryptedUser.signature);
+      }
+      return {
+        ...decryptedAction,
+        user: decryptedUser as User,
+      };
+    }) as (WorkflowAction & { user: User })[];
   }
 
   async createVerificationLog(insertLog: InsertVerificationLog): Promise<VerificationLog> {
@@ -392,9 +458,15 @@ export class DatabaseStorage implements IStorage {
       workflowWithActions = await this.getWorkflowWithActions(workflow.id);
     }
 
+    // Decrypt user signature
+    const decryptedUser = { ...document.users };
+    if (decryptedUser.signature) {
+      decryptedUser.signature = decryptSignature(decryptedUser.signature);
+    }
+    
     return {
       ...document.documents,
-      user: document.users,
+      user: decryptedUser,
       workflow: workflowWithActions
     } as any;
   }
